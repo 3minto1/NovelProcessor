@@ -19,7 +19,9 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let conn = Connection::open("novel_processor.db").expect("Failed to open database");
+    let db_path = "novel_processor.db";
+    
+    let conn = Connection::open(db_path).expect("Failed to open database");
     db::schema::init_db(&conn).expect("Failed to initialize database");
     
     let state = AppState {
@@ -40,7 +42,13 @@ pub fn run() {
             commands::models::list_model_profiles,
             commands::models::save_model_profile,
             commands::models::delete_model_profile,
+            commands::models::diagnose_model_profile,
+            commands::models::list_ai_logs,
+            commands::models::clear_ai_logs,
             commands::jobs::get_job,
+            commands::settings::get_app_settings,
+            commands::settings::save_app_settings,
+            commands::settings::save_selected_profile_id,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

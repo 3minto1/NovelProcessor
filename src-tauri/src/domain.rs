@@ -111,3 +111,17 @@ pub struct ModelOutput {
     pub elapsed_ms: u128,
     pub retried_without_thinking: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosisCheck {
+    pub name: String,
+    pub status: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelDiagnosis {
+    pub status: String,
+    pub recommended_thinking_mode: Option<String>,
+    pub checks: Vec<DiagnosisCheck>,
+}
