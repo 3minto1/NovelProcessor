@@ -1,0 +1,121 @@
+use super::common::*;
+use crate::domain::{ModelOutput, ModelProfile};
+use crate::model_support::{format_request_error, response_json_or_error, ModelResponseError};
+use reqwest::Client;
+use serde_json::json;
+
+pub(crate) async fn generate_openai_compatible(
+    client: &Client,
+    profile: &ModelProfile,
+    api_key: &str,
+    system: &str,
+    user: &str,
+    prefer_json_output: bool,
+    output_limit_override: Option<usize>,
+) -> Result<ModelOutput, ModelResponseError> {
+    let base = profile.base_url.trim().trim_end_matches('/');
+    let model = normalize_model_name(base, &profile.model);
+    let endpoint = if base.ends_with("/chat/completions") {
+        base.to_string()
+    } else {
+        format!("{}/chat/completions", base)
+    };
+    let mut payload = json!({
+        "model": model,
+        "temperature": profile.temperature,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ]
+    });
+    apply_top_p(&mut payload, profile.top_p);
+    if prefer_json_output {
+        if let Some(response_format) = openai_compatible_json_response_format(profile, base, &model)
+        {
+            payload["response_format"] = response_format;
+        }
+    }
+    apply_openai_compatible_output_limit(
+        &mut payload,
+        profile,
+        base,
+        &model,
+        prefer_json_output,
+        output_limit_override,
+    );
+    let added_thinking_control =
+        apply_openai_compatible_thinking_control(&mut payload, profile, base, &model);
+    let response = client
+        .post(&endpoint)
+        .bearer_auth(api_key.trim())
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|error| ModelResponseError::other(format_request_error(error)))?;
+    let mut retried_without_thinking = false;
+    let (value, raw_response) = match response_json_or_error(response).await {
+        Ok(result) => result,
+        Err(error) if added_thinking_control && error.permits_thinking_retry() => {
+            let mut retry_payload = payload;
+            retry_payload
+                .as_object_mut()
+                .expect("payload is an object")
+                .remove("reasoning_effort");
+            retry_payload
+                .as_object_mut()
+                .expect("payload is an object")
+                .remove("reasoning");
+            retry_payload
+                .as_object_mut()
+                .expect("payload is an object")
+                .remove("thinking");
+            let retry_response = client
+                .post(endpoint)
+                .bearer_auth(api_key.trim())
+                .json(&retry_payload)
+                .send()
+                .await
+                .map_err(|error| ModelResponseError::other(format_request_error(error)))?;
+            let retry_result =
+                response_json_or_error(retry_response)
+                    .await
+                    .map_err(|retry_error| {
+                        ModelResponseError::other(format!(
+                            "{}；移除思考模式参数重试后仍失败：{}",
+                            error, retry_error
+                        ))
+                    })?;
+            retried_without_thinking = true;
+            retry_result
+        }
+        Err(error) => return Err(error),
+    };
+    let text = value["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|text| text.to_string())
+        .ok_or_else(|| {
+            ModelResponseError::other(format!(
+                "模型响应缺少 choices[0].message.content: {}",
+                value
+            ))
+        })?;
+    let reasoning = value["choices"][0]["message"]["reasoning_content"]
+        .as_str()
+        .or_else(|| value["choices"][0]["message"]["reasoning"].as_str())
+        .map(str::to_string);
+    Ok(ModelOutput {
+        text,
+        reasoning,
+        raw_response,
+        input_chars: 0,
+        output_chars: 0,
+        elapsed_ms: 0,
+        retried_without_thinking,
+    })
+}
+
+fn apply_top_p(payload: &mut serde_json::Value, top_p: f64) {
+    if top_p < 1.0 {
+        payload["top_p"] = json!(top_p);
+    }
+}
