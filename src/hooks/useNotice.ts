@@ -1,20 +1,22 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function useNotice() {
   const [notice, setNotice] = useState("");
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const [duration, setDuration] = useState(5000);
 
-  const showNotice = useCallback((message: string, duration = 5000) => {
-    setNotice(message);
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    if (duration > 0) {
-      timerRef.current = setTimeout(() => {
-        setNotice("");
-      }, duration);
-    }
-  }, []);
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(""), duration);
+    return () => window.clearTimeout(timer);
+  }, [duration, notice]);
+
+  const showNotice = useCallback(
+    (message: string, nextDuration = 5000) => {
+      setDuration(nextDuration);
+      setNotice(message);
+    },
+    []
+  );
 
   return { notice, setNotice, showNotice };
 }

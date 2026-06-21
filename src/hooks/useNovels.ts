@@ -1,44 +1,35 @@
-import { useCallback } from "react";
+import { useMemo } from "react";
 import { useAppStore } from "../store/appStore";
-import { invokeCommand } from "../tauriApi";
-import type { NovelDetail } from "../types";
 
 export function useNovels() {
-  const {
+  const novels = useAppStore((state) => state.novels);
+  const setNovels = useAppStore((state) => state.setNovels);
+  const detail = useAppStore((state) => state.detail);
+  const setDetail = useAppStore((state) => state.setDetail);
+  const selectedChapterId = useAppStore((state) => state.selectedChapterId);
+  const setSelectedChapterId = useAppStore((state) => state.setSelectedChapterId);
+  const selectedBatchId = useAppStore((state) => state.selectedBatchId);
+  const setSelectedBatchId = useAppStore((state) => state.setSelectedBatchId);
+
+  const selectedChapter = useMemo(
+    () => detail?.chapters.find((chapter) => chapter.id === selectedChapterId) ?? detail?.chapters[0],
+    [detail, selectedChapterId]
+  );
+  const selectedBatch = useMemo(
+    () => detail?.batches.find((batch) => batch.id === selectedBatchId) ?? detail?.batches[0],
+    [detail, selectedBatchId]
+  );
+
+  return {
+    novels,
+    setNovels,
     detail,
     setDetail,
     selectedChapterId,
     setSelectedChapterId,
     selectedBatchId,
     setSelectedBatchId,
-  } = useAppStore();
-
-  const loadNovel = useCallback(
-    async (novelId: string) => {
-      const next: NovelDetail = await invokeCommand("get_novel_detail", {
-        novelId,
-      });
-      setDetail(next);
-      setSelectedChapterId(next.chapters[0]?.id ?? "");
-      setSelectedBatchId(next.batches[0]?.id ?? "");
-    },
-    [setDetail, setSelectedChapterId, setSelectedBatchId]
-  );
-
-  const refreshNovel = useCallback(async () => {
-    if (!detail) return;
-    await loadNovel(detail.novel.id);
-  }, [detail, loadNovel]);
-
-  return {
-    detail,
-    selectedChapterId,
-    setSelectedChapterId,
-    selectedBatchId,
-    setSelectedBatchId,
-    loadNovel,
-    refreshNovel,
-    selectedChapter: detail?.chapters.find((c) => c.id === selectedChapterId),
-    selectedBatch: detail?.batches.find((b) => b.id === selectedBatchId),
+    selectedChapter,
+    selectedBatch,
   };
 }

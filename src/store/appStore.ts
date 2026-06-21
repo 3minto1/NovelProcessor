@@ -29,7 +29,7 @@ const initialState = {
   profiles: [],
   selectedProfileId: "",
   busy: "",
-  job: null,
+  job: null
 };
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -42,5 +42,5 @@ export const useAppStore = create<AppStore>((set) => ({
   setSelectedProfileId: (selectedProfileId) => set({ selectedProfileId }),
   setBusy: (busy) => set({ busy }),
   setJob: (job) => set({ job }),
-  reset: () => set(initialState),
+  reset: () => set(initialState)
 }));

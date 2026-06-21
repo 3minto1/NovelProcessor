@@ -1,8 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AiLog,
+  AppSettings,
   ExportResult,
   Job,
+  JobEstimate,
+  ModelDiagnosis,
   ModelProfile,
+  ModelProfileInput,
   Novel,
   NovelDetail,
 } from "./types";
@@ -13,35 +18,25 @@ type CommandMap = {
   import_txt: { args: { filePath: string }; result: Novel };
   delete_novel: { args: { novelId: string }; result: void };
   list_model_profiles: { args?: undefined; result: ModelProfile[] };
-  save_model_profile: {
-    args: {
-      name: string;
-      provider: string;
-      base_url: string;
-      model: string;
-      temperature: number;
-      top_p: number;
-      thinking_mode: string;
-      api_key?: string;
-    };
-    result: ModelProfile;
-  };
+  save_model_profile: { args: { input: ModelProfileInput }; result: ModelProfile };
   delete_model_profile: { args: { profileId: string }; result: void };
-  start_validation: {
-    args: { novelId: string; profileId: string };
-    result: Job;
+  diagnose_model_profile: { args: { profileId: string }; result: ModelDiagnosis };
+  list_ai_logs: { args: { novelId: string | null }; result: AiLog[] };
+  clear_ai_logs: { args: { novelId: string | null }; result: void };
+  get_app_settings: { args?: undefined; result: AppSettings };
+  save_app_settings: { args: { settings: AppSettings }; result: AppSettings };
+  save_selected_profile_id: { args: { profileId: string | null }; result: AppSettings };
+  estimate_job_cost: {
+    args: { novelId: string; batchId: string | null; profileId: string | null };
+    result: JobEstimate;
   };
-  start_review: {
-    args: { novelId: string; profileId: string };
-    result: Job;
-  };
-  export_novel: {
-    args: { novelId: string; outputDir: string };
-    result: ExportResult;
-  };
-  get_job: {
-    args: { jobId: string };
-    result: Job;
+  start_validation: { args: { novelId: string; profileId: string }; result: Job };
+  start_review: { args: { novelId: string; profileId: string }; result: Job };
+  export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
+  get_job: { args: { jobId: string }; result: Job };
+  record_frontend_error: {
+    args: { message: string; stack: string | null; componentStack: string | null };
+    result: void;
   };
 };
 

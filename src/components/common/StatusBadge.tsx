@@ -1,51 +1,49 @@
+import { memo } from "react";
+
+export type StatusTone = "success" | "progress" | "warning" | "danger" | "neutral";
+
+const STATUS_TONES: Record<string, StatusTone> = {
+  completed: "success",
+  success: "success",
+  ok: "success",
+  valid: "success",
+  running: "progress",
+  processing: "progress",
+  pausing: "warning",
+  paused: "warning",
+  warning: "warning",
+  failed: "danger",
+  error: "danger",
+  invalid: "danger",
+  pending: "neutral",
+  imported: "neutral",
+  terminated: "neutral",
+  cancelled: "neutral",
+  canceled: "neutral"
+};
+
+export function getStatusTone(status?: string | null): StatusTone {
+  return STATUS_TONES[status?.trim().toLowerCase() ?? ""] ?? "neutral";
+}
+
 type StatusBadgeProps = {
-  status: string;
-  label?: string;
+  status?: string | null;
+  label: string;
+  showDot?: boolean;
+  className?: string;
 };
 
-const statusColors: Record<string, string> = {
-  pending: "#f39c12",
-  running: "#3498db",
-  completed: "#27ae60",
-  failed: "#e74c3c",
-  imported: "#9b59b6",
-  valid: "#27ae60",
-  invalid: "#e74c3c",
-};
-
-export function StatusBadge({ status, label }: StatusBadgeProps) {
-  const color = statusColors[status] || "#95a5a6";
-  const displayLabel = label || status;
-
+export const StatusBadge = memo(function StatusBadge({
+  status,
+  label,
+  showDot = true,
+  className = ""
+}: StatusBadgeProps) {
+  const tone = getStatusTone(status);
   return (
-    <span
-      className="status-badge"
-      style={{
-        backgroundColor: color,
-        color: "white",
-        padding: "2px 8px",
-        borderRadius: "4px",
-        fontSize: "12px",
-        fontWeight: 500,
-      }}
-    >
-      {displayLabel}
+    <span className={`status-badge status-${tone}${className ? ` ${className}` : ""}`}>
+      {showDot && <span className="status-badge-dot" aria-hidden="true" />}
+      <span>{label}</span>
     </span>
   );
-}
-
-export function getStatusTone(status: string): "ok" | "warning" | "error" {
-  switch (status) {
-    case "completed":
-    case "valid":
-      return "ok";
-    case "running":
-    case "pending":
-      return "warning";
-    case "failed":
-    case "invalid":
-      return "error";
-    default:
-      return "warning";
-  }
-}
+});

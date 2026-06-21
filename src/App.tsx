@@ -3,52 +3,93 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   BookOpen,
   CheckCircle2,
-  FileText,
+  Download,
+  FilePlus2,
   Loader2,
-  Play,
-  Settings,
+  MoreHorizontal,
+  Square,
   Trash2,
-  XCircle,
+  X
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { ErrorBoundary } from "./components/common/ErrorBoundary";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { DeleteNovelDialog } from "./components/common/DeleteNovelDialog";
+import { getStatusTone, StatusBadge } from "./components/common/StatusBadge";
+import { ModelProfiles } from "./components/Settings/ModelProfiles";
+import { BatchPanel } from "./components/Workspace/BatchPanel";
+import { ChapterList } from "./components/Workspace/ChapterList";
+import { ModelConfig } from "./components/Workspace/ModelConfig";
+import {
+  emptyProfile as defaultProfile,
+  getModelSuggestions as detectModelSuggestions
+} from "./config/modelRecommendations";
 import { useModelProfiles } from "./hooks/useModelProfiles";
 import { useNovels } from "./hooks/useNovels";
 import { useNotice } from "./hooks/useNotice";
-import { useAppStore } from "./store/appStore";
+import { useTaskState } from "./hooks/useTaskState";
 import { invokeCommand as invoke } from "./tauriApi";
-import type { Job, Novel } from "./types";
+import type {
+  AppSettings,
+  Chapter,
+  Job,
+  ModelDiagnosis,
+  Novel,
+  NovelDetail
+} from "./types";
 
-type WorkflowStep = "import" | "validate" | "review" | "export";
+type View = "workspace" | "settings";
+
+const savedApiKeyMask = "********";
+
+const statusText: Record<string, string> = {
+  pending: "待处理",
+  running: "进行中",
+  completed: "完成",
+  failed: "失败",
+  imported: "已导入"
+};
 
 export default function App() {
-  const { novels, setNovels, detail, setDetail, busy, setBusy, job, setJob, setProfiles } =
-    useAppStore();
-  const { notice, setNotice, showNotice } = useNotice();
   const {
-    profiles,
-    selectedProfileId,
-    setSelectedProfileId,
-  } = useModelProfiles();
-  const { loadNovel } = useNovels();
+    novels, setNovels, detail, setDetail, selectedChapterId, setSelectedChapterId,
+    selectedBatchId, setSelectedBatchId, selectedBatch
+  } = useNovels();
+  const {
+    profiles, setProfiles, profileDraft, setProfileDraft,
+    selectedProfileId, setSelectedProfileId, selectedProfile
+  } = useModelProfiles(defaultProfile);
+  const {
+    busy, setBusy, job, setJob, processingTaskActive
+  } = useTaskState();
+  const { notice, setNotice, showNotice } = useNotice();
 
-  const [activeStep, setActiveStep] = useState<WorkflowStep>("import");
+  const [activeView, setActiveView] = useState<View>("workspace");
+  const [openNovelMenuId, setOpenNovelMenuId] = useState("");
+  const [openModelMenu, setOpenModelMenu] = useState(false);
+  const [openModelSuggestions, setOpenModelSuggestions] = useState(false);
+  const [novelPendingDeletion, setNovelPendingDeletion] = useState<Novel | null>(null);
+  const [settings, setSettings] = useState<AppSettings>({});
+  const [modelDiagnosis, setModelDiagnosis] = useState<ModelDiagnosis | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [showModelDialog, setShowModelDialog] = useState(false);
-  const [modelDraft, setModelDraft] = useState({
-    name: "",
-    provider: "openai-compatible",
-    base_url: "https://api.openai.com/v1",
-    model: "",
-    temperature: 0.7,
-    top_p: 1.0,
-    thinking_mode: "auto" as const,
-    api_key: "",
-  });
+  const detailRef = useRef<NovelDetail | null>(null);
+  const busyRef = useRef("");
+  const importInProgressRef = useRef(false);
+
+  const detectedModelSuggestions = useMemo(
+    () => detectModelSuggestions(profileDraft),
+    [profileDraft.provider, profileDraft.base_url, profileDraft.model]
+  );
 
   useEffect(() => {
     void refreshAll();
   }, []);
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
+    detailRef.current = detail;
+  }, [detail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +141,6 @@ export default function App() {
         
         if (updatedJob.status === "completed" || updatedJob.status === "failed") {
           clearInterval(interval);
-          // Refresh novel data
           if (detail) {
             await loadNovel(detail.novel.id);
           }
@@ -114,22 +154,47 @@ export default function App() {
   }, [job?.id, job?.status]);
 
   async function refreshAll() {
-    const [novelRows, profileRows] = await Promise.all([
+    const [novelRows, profileRows, appSettings] = await Promise.all([
       invoke("list_novels"),
       invoke("list_model_profiles"),
+      invoke("get_app_settings")
     ]);
     setNovels(novelRows);
     setProfiles(profileRows);
+    setSettings(appSettings);
+    const savedProfileId = appSettings.selected_profile_id ?? "";
+    const savedProfileIsValid = savedProfileId && profileRows.some((p) => p.id === savedProfileId);
+    if (!selectedProfileId || !profileRows.some((p) => p.id === selectedProfileId)) {
+      setSelectedProfileId(savedProfileIsValid ? savedProfileId : profileRows[0]?.id ?? "");
+    }
     if (novelRows[0]) {
       await loadNovel(novelRows[0].id);
     }
   }
 
+  async function loadNovel(novelId: string) {
+    if (processingTaskActive && detail?.novel.id !== novelId) {
+      showNotice("当前任务运行或暂停中，不能切换小说。");
+      return;
+    }
+    const next = await invoke("get_novel_detail", { novelId });
+    setDetail(next);
+    setSelectedChapterId(next.chapters[0]?.id ?? "");
+    setSelectedBatchId(next.batches[0]?.id ?? "");
+  }
+
+  function isTxtFilePath(filePath: string) {
+    return filePath.trim().toLowerCase().endsWith(".txt");
+  }
+
   async function importTxtFile(filePath: string) {
-    if (!filePath.endsWith(".txt")) {
+    if (!isTxtFilePath(filePath)) {
       showNotice("当前仅支持导入 TXT 小说文件。");
       return;
     }
+    if (importInProgressRef.current) return;
+    importInProgressRef.current = true;
+    busyRef.current = "import";
     setBusy("import");
     setNotice("");
     try {
@@ -140,48 +205,174 @@ export default function App() {
     } catch (error) {
       showNotice(String(error));
     } finally {
+      importInProgressRef.current = false;
+      busyRef.current = "";
       setBusy("");
     }
   }
 
   async function importTxt() {
+    busyRef.current = "import";
     setBusy("import");
     setNotice("");
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "TXT 小说", extensions: ["txt"] }],
+        filters: [{ name: "TXT 小说", extensions: ["txt"] }]
       });
       if (typeof selected !== "string") return;
       await importTxtFile(selected);
     } catch (error) {
       showNotice(String(error));
     } finally {
-      setBusy("");
+      if (!importInProgressRef.current) {
+        busyRef.current = "";
+        setBusy("");
+      }
     }
   }
 
-  async function deleteNovel(novel: Novel) {
-    if (!window.confirm(`删除《${novel.title}》？`)) return;
+  function deleteNovel(novel: Novel) {
+    if (processingTaskActive) {
+      showNotice("当前任务运行或暂停中，不能删除小说。");
+      return;
+    }
+    setOpenNovelMenuId("");
+    setNovelPendingDeletion(novel);
+  }
+
+  async function confirmDeleteNovel() {
+    const novel = novelPendingDeletion;
+    if (!novel) return;
+    if (processingTaskActive) {
+      setNovelPendingDeletion(null);
+      showNotice("当前任务运行或暂停中，不能删除小说。");
+      return;
+    }
     setBusy("delete-novel");
     setNotice("");
     try {
       await invoke("delete_novel", { novelId: novel.id });
       const remaining = await invoke("list_novels");
       setNovels(remaining);
+      setOpenNovelMenuId("");
       if (detail?.novel.id === novel.id) {
         if (remaining[0]) {
           await loadNovel(remaining[0].id);
         } else {
           setDetail(null);
+          setSelectedChapterId("");
+          setSelectedBatchId("");
         }
       }
+      setNovelPendingDeletion(null);
       showNotice(`已删除《${novel.title}》。`);
     } catch (error) {
       showNotice(String(error));
     } finally {
       setBusy("");
     }
+  }
+
+  async function saveProfile() {
+    setBusy("profile");
+    setNotice("");
+    try {
+      const input = {
+        ...profileDraft,
+        id: profileDraft.id && selectedProfileId === profileDraft.id ? profileDraft.id : undefined,
+        name: profileDraft.name.trim(),
+        provider: profileDraft.provider.trim(),
+        base_url: profileDraft.base_url.trim(),
+        model: profileDraft.model.trim(),
+        api_key: profileDraft.api_key === savedApiKeyMask ? undefined : profileDraft.api_key
+      };
+      const saved = await invoke("save_model_profile", { input });
+      setSelectedProfileId(saved.id);
+      setProfileDraft({ ...profileDraft, id: saved.id, api_key: saved.has_api_key ? savedApiKeyMask : "" });
+      await persistSelectedProfileId(saved.id);
+      await refreshAll();
+      showNotice(saved.has_api_key ? "模型配置和 API Key 已保存。" : "模型配置已保存，尚未保存 API Key。");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function createNewModelProfile() {
+    setSelectedProfileId("");
+    setProfileDraft(defaultProfile);
+    setOpenModelMenu(false);
+    void persistSelectedProfileId("");
+    showNotice("已切换为新建模型配置，填写后点击保存。");
+  }
+
+  async function deleteSelectedModelProfile() {
+    if (processingTaskActive) {
+      showNotice("当前任务运行或暂停中，不能删除模型配置。");
+      return;
+    }
+    const profile = profiles.find((item) => item.id === selectedProfileId);
+    if (!profile) {
+      showNotice("请先选择一个模型配置。");
+      return;
+    }
+    if (!window.confirm(`删除模型配置「${profile.model}」及其保存的 API Key？`)) return;
+    setBusy("delete-model");
+    setNotice("");
+    try {
+      await invoke("delete_model_profile", { profileId: profile.id });
+      const nextProfiles = await invoke("list_model_profiles");
+      setProfiles(nextProfiles);
+      const nextSelected = nextProfiles[0]?.id ?? "";
+      setSelectedProfileId(nextSelected);
+      setOpenModelMenu(false);
+      await persistSelectedProfileId(nextSelected);
+      if (!nextSelected) setProfileDraft(defaultProfile);
+      showNotice(`已删除模型配置「${profile.model}」。`);
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function diagnoseProfile() {
+    if (!selectedProfileId) {
+      showNotice("请先保存并选择一个模型配置。");
+      return;
+    }
+    setBusy("diagnose");
+    setNotice("");
+    setModelDiagnosis(null);
+    try {
+      const result = await invoke("diagnose_model_profile", {
+        profileId: selectedProfileId
+      });
+      setModelDiagnosis(result);
+      const label = result.status === "ok" ? "诊断通过" : result.status === "warning" ? "诊断有警告" : "诊断失败";
+      showNotice(label);
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function persistSelectedProfileId(profileId: string) {
+    try {
+      const saved = await invoke("save_selected_profile_id", { profileId: profileId || null });
+      setSettings(saved);
+    } catch (error) {
+      console.error("Failed to persist selected model profile", error);
+    }
+  }
+
+  function selectModelProfile(profileId: string) {
+    setSelectedProfileId(profileId);
+    setOpenModelMenu(false);
+    void persistSelectedProfileId(profileId);
   }
 
   async function runValidation() {
@@ -194,10 +385,9 @@ export default function App() {
     try {
       const result = await invoke("start_validation", {
         novelId: detail.novel.id,
-        profileId: selectedProfileId,
+        profileId: selectedProfileId
       });
       setJob(result);
-      await loadNovel(detail.novel.id);
       showNotice(result.message);
     } catch (error) {
       showNotice(String(error));
@@ -216,10 +406,9 @@ export default function App() {
     try {
       const result = await invoke("start_review", {
         novelId: detail.novel.id,
-        profileId: selectedProfileId,
+        profileId: selectedProfileId
       });
       setJob(result);
-      await loadNovel(detail.novel.id);
       showNotice(result.message);
     } catch (error) {
       showNotice(String(error));
@@ -237,7 +426,7 @@ export default function App() {
       if (typeof selected !== "string") return;
       const result = await invoke("export_novel", {
         novelId: detail.novel.id,
-        outputDir: selected,
+        outputDir: selected
       });
       showNotice(`已导出：${result.path}`);
     } catch (error) {
@@ -247,402 +436,269 @@ export default function App() {
     }
   }
 
-  async function saveModelProfile() {
-    setBusy("save-model");
-    setNotice("");
-    try {
-      await invoke("save_model_profile", {
-        name: modelDraft.name,
-        provider: modelDraft.provider,
-        base_url: modelDraft.base_url,
-        model: modelDraft.model,
-        temperature: modelDraft.temperature,
-        top_p: modelDraft.top_p,
-        thinking_mode: modelDraft.thinking_mode,
-        api_key: modelDraft.api_key || undefined,
-      });
-      await refreshAll();
-      setShowModelDialog(false);
-      setModelDraft({
-        name: "",
-        provider: "openai-compatible",
-        base_url: "https://api.openai.com/v1",
-        model: "",
-        temperature: 0.7,
-        top_p: 1.0,
-        thinking_mode: "auto",
-        api_key: "",
-      });
-      showNotice("模型配置已保存。");
-    } catch (error) {
-      showNotice(String(error));
-    } finally {
-      setBusy("");
-    }
+  function displayChapterTitle(chapter: Chapter) {
+    const title = chapter.title.replace(/\s+/g, " ").trim();
+    return title || `第 ${chapter.index} 章`;
   }
 
   const validChapters = detail?.chapters.filter((c) => c.is_valid) ?? [];
   const invalidChapters = detail?.chapters.filter((c) => !c.is_valid) ?? [];
 
   return (
-    <ErrorBoundary>
-      <div className="app">
-        <header className="app-header">
-          <h1>NovelProcessor</h1>
-          <div className="header-actions">
-            <select
-              value={selectedProfileId}
-              onChange={(e) => setSelectedProfileId(e.target.value)}
-            >
-              <option value="">选择模型</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => setShowModelDialog(true)}>
-              <Settings size={14} />
-              添加模型
-            </button>
-          </div>
-        </header>
-
-        <div className="app-content">
-          <aside className="sidebar">
-            <div className="sidebar-section">
-              <h3>小说列表</h3>
-              <button onClick={importTxt} disabled={!!busy}>
-                <FileText size={14} />
-                导入TXT
-              </button>
-              <ul className="novel-list">
-                {novels.map((novel) => (
-                  <li
-                    key={novel.id}
-                    className={detail?.novel.id === novel.id ? "active" : ""}
-                  >
-                    <span onClick={() => loadNovel(novel.id)}>
-                      {novel.title}
-                    </span>
-                    <button
-                      onClick={() => deleteNovel(novel)}
-                      className="icon-button"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </li>
-                ))}
-              </ul>
+    <div className="app-shell">
+      <header className="app-menu">
+        <div className="brand">
+          <button className="brand-button" onClick={() => setActiveView("workspace")}>
+            <BookOpen size={20} />
+            <div>
+              <strong>NovelProcessor</strong>
+              <span>小说处理器</span>
             </div>
-          </aside>
+          </button>
+        </div>
+        <div className="app-menu-spacer" />
+        <button
+          className={`app-menu-item ${activeView === "workspace" ? "active" : ""}`}
+          onClick={() => setActiveView("workspace")}
+        >
+          工作区
+        </button>
+        <button
+          className={`app-menu-item ${activeView === "settings" ? "active" : ""}`}
+          onClick={() => setActiveView("settings")}
+        >
+          设置
+        </button>
+      </header>
 
-          <main className="main-content">
-            {detail ? (
-              <>
-                <div className="workflow-steps">
-                  <button
-                    className={activeStep === "import" ? "active" : ""}
-                    onClick={() => setActiveStep("import")}
-                  >
-                    <FileText size={16} />
-                    导入
-                  </button>
-                  <button
-                    className={activeStep === "validate" ? "active" : ""}
-                    onClick={() => setActiveStep("validate")}
-                  >
-                    <CheckCircle2 size={16} />
-                    验证
-                  </button>
-                  <button
-                    className={activeStep === "review" ? "active" : ""}
-                    onClick={() => setActiveStep("review")}
-                  >
-                    <BookOpen size={16} />
-                    审查
-                  </button>
-                  <button
-                    className={activeStep === "export" ? "active" : ""}
-                    onClick={() => setActiveStep("export")}
-                  >
-                    <Play size={16} />
-                    导出
-                  </button>
-                </div>
-
-                <div className="step-content">
-                  {activeStep === "import" && (
-                    <div className="import-step">
-                      <h2>导入小说</h2>
-                      <div className="stats-grid">
-                        <div className="stat-card">
-                          <div className="value">{detail.chapters.length}</div>
-                          <div className="label">总章节数</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="value">{validChapters.length}</div>
-                          <div className="label">有效章节</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="value">{invalidChapters.length}</div>
-                          <div className="label">无效章节</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="value">{detail.novel.encoding}</div>
-                          <div className="label">编码格式</div>
-                        </div>
-                      </div>
-                      <div className="chapter-list">
-                        {detail.chapters.slice(0, 30).map((chapter) => (
-                          <div key={chapter.id} className="chapter-item">
-                            <span>{chapter.title}</span>
-                            <span style={{ fontSize: '12px', color: '#999' }}>
-                              {chapter.original_text.length} 字
-                            </span>
-                          </div>
-                        ))}
-                        {detail.chapters.length > 30 && (
-                          <div className="chapter-item" style={{ color: '#999' }}>
-                            ... 还有 {detail.chapters.length - 30} 章
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {activeStep === "validate" && (
-                    <div className="validate-step">
-                      <h2>AI验证章节</h2>
-                      <p>将发送章节给AI判断是否为有效小说内容，剔除广告、作者笔记、乱码等无效内容</p>
-                      <button
-                        onClick={runValidation}
-                        disabled={!!busy || !selectedProfileId}
-                        className="primary-button"
-                      >
-                        {busy === "validate" ? (
-                          <Loader2 className="spin" size={16} />
-                        ) : (
-                          <CheckCircle2 size={16} />
-                        )}
-                        开始验证
-                      </button>
-                      {!selectedProfileId && (
-                        <p style={{ color: '#f44336', marginTop: '8px' }}>
-                          请先选择一个模型配置
-                        </p>
-                      )}
-                      {job && job.job_type === "validate" && (
-                        <div className="job-progress">
-                          <p>{job.message}</p>
-                          <div className="progress-bar">
-                            <div
-                              className="progress-fill"
-                              style={{
-                                width: `${job.total_chapters > 0 ? (job.current_chapter / job.total_chapters) * 100 : 0}%`,
-                              }}
-                            />
-                          </div>
-                          <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-                            {job.current_chapter} / {job.total_chapters}
-                          </p>
-                        </div>
-                      )}
-                      {invalidChapters.length > 0 && (
-                        <div className="validation-results">
-                          <h3 style={{ marginTop: '20px', marginBottom: '12px' }}>
-                            验证结果 ({invalidChapters.length} 个无效章节)
-                          </h3>
-                          {invalidChapters.slice(0, 10).map((chapter) => (
-                            <div key={chapter.id} className="validation-item invalid">
-                              <XCircle size={16} color="#f44336" className="icon" />
-                              <div className="content">
-                                <div className="title">{chapter.title}</div>
-                                <div className="reason">
-                                  {chapter.validation_reason || "AI判定为无效内容"}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {activeStep === "review" && (
-                    <div className="review-step">
-                      <h2>AI审查章节</h2>
-                      <p>检查错别字、无关内容和语法问题，并自动修正</p>
-                      <button
-                        onClick={runReview}
-                        disabled={!!busy || !selectedProfileId}
-                        className="primary-button"
-                      >
-                        {busy === "review" ? (
-                          <Loader2 className="spin" size={16} />
-                        ) : (
-                          <BookOpen size={16} />
-                        )}
-                        开始审查
-                      </button>
-                      {!selectedProfileId && (
-                        <p style={{ color: '#f44336', marginTop: '8px' }}>
-                          请先选择一个模型配置
-                        </p>
-                      )}
-                      {job && job.job_type === "review" && (
-                        <div className="job-progress">
-                          <p>{job.message}</p>
-                          <div className="progress-bar">
-                            <div
-                              className="progress-fill"
-                              style={{
-                                width: `${job.total_chapters > 0 ? (job.current_chapter / job.total_chapters) * 100 : 0}%`,
-                              }}
-                            />
-                          </div>
-                          <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-                            {job.current_chapter} / {job.total_chapters}
-                          </p>
-                        </div>
-                      )}
-                      <div style={{ marginTop: '20px' }}>
-                        <p>有效章节: {validChapters.length} 章</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {activeStep === "export" && (
-                    <div className="export-step">
-                      <h2>导出小说</h2>
-                      <p>将修正后的小说导出为TXT文件</p>
-                      <div className="stats-grid">
-                        <div className="stat-card">
-                          <div className="value">{validChapters.length}</div>
-                          <div className="label">导出章节数</div>
-                        </div>
-                        <div className="stat-card">
-                          <div className="value">
-                            {validChapters.reduce((sum, c) => sum + (c.corrected_text || c.original_text).length, 0).toLocaleString()}
-                          </div>
-                          <div className="label">总字数</div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={exportNovel}
-                        disabled={!!busy || validChapters.length === 0}
-                        className="primary-button"
-                        style={{ marginTop: '20px' }}
-                      >
-                        {busy === "export" ? (
-                          <Loader2 className="spin" size={16} />
-                        ) : (
-                          <Play size={16} />
-                        )}
-                        导出
-                      </button>
-                      {validChapters.length === 0 && (
-                        <p style={{ color: '#f44336', marginTop: '8px' }}>
-                          没有可导出的有效章节
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </>
-            ) : (
-              <div className="empty-state">
-                <BookOpen size={48} />
-                <h2>欢迎使用 NovelProcessor</h2>
-                <p>请导入TXT小说文件开始处理</p>
-                <button onClick={importTxt}>
-                  <FileText size={16} />
-                  导入小说
+      <aside className="sidebar">
+        <div className="side-section">
+          <span className="section-label">小说列表</span>
+          <button className="primary-action" onClick={importTxt} disabled={!!busy}>
+            <FilePlus2 size={16} />导入 TXT
+          </button>
+          <div className="novel-list">
+            {novels.map((novel) => (
+              <div className="novel-row" key={novel.id}>
+                <button
+                  className={`novel-item ${detail?.novel.id === novel.id ? "active" : ""}`}
+                  onClick={() => void loadNovel(novel.id)}
+                >
+                  <span>{novel.title}</span>
                 </button>
+                <button
+                  className="icon-button menu-trigger"
+                  onClick={() => setOpenNovelMenuId(openNovelMenuId === novel.id ? "" : novel.id)}
+                  disabled={processingTaskActive}
+                >
+                  <MoreHorizontal size={16} />
+                </button>
+                {openNovelMenuId === novel.id && (
+                  <div className="context-menu">
+                    <button onClick={() => deleteNovel(novel)}>
+                      <Trash2 size={15} />删除
+                    </button>
+                  </div>
+                )}
               </div>
-            )}
-          </main>
+            ))}
+          </div>
         </div>
 
-        {notice && <div className="notice">{notice}</div>}
+        <div className="side-section">
+          <span className="section-label">审查模型</span>
+          <ModelProfiles
+            profiles={profiles}
+            selectedProfileId={selectedProfileId}
+            menuOpen={openModelMenu}
+            busy={busy}
+            processing={processingTaskActive}
+            onSelect={selectModelProfile}
+            onMenuOpenChange={setOpenModelMenu}
+            onDelete={deleteSelectedModelProfile}
+          />
+        </div>
 
-        {dragActive && (
-          <div className="drag-overlay">
-            <p>拖放TXT文件到此处</p>
+        <div className="sidebar-spacer" />
+      </aside>
+
+      {activeView === "workspace" && detail && (
+        <div className="workspace">
+          <div className="topbar">
+            <div>
+              <h1>{detail.novel.title}</h1>
+              <p>
+                {detail.chapters.length} 章 · {validChapters.length} 有效 · {invalidChapters.length} 无效
+              </p>
+            </div>
+            <div className="topbar-actions">
+              {detail && !processingTaskActive && (
+                <>
+                  <button onClick={runValidation} disabled={!selectedProfileId || !!busy}>
+                    {busy === "validate" ? <Loader2 className="spin" size={16} /> : <CheckCircle2 size={16} />}
+                    验证章节
+                  </button>
+                  <button onClick={runReview} disabled={!selectedProfileId || !!busy}>
+                    {busy === "review" ? <Loader2 className="spin" size={16} /> : <BookOpen size={16} />}
+                    审查内容
+                  </button>
+                  <button onClick={exportNovel} disabled={!!busy || validChapters.length === 0}>
+                    {busy === "export" ? <Loader2 className="spin" size={16} /> : <Download size={16} />}
+                    导出
+                  </button>
+                </>
+              )}
+              {processingTaskActive && (
+                <button onClick={() => {}}>
+                  <Square size={16} />停止
+                </button>
+              )}
+            </div>
           </div>
-        )}
 
-        {showModelDialog && (
-          <dialog open className="modal">
-            <div className="modal-header">
-              <h2>添加模型配置</h2>
-              <button className="icon-button" onClick={() => setShowModelDialog(false)}>
-                <XCircle size={18} />
+          {notice && <div className="notice">{notice}</div>}
+
+          {job && (
+            <div className={`job-strip status-${getStatusTone(job.status)}`}>
+              <div className="job-content">
+                <span>{job.message}</span>
+                {job.total_chapters > 0 && (
+                  <div className="job-progress-row">
+                    <div className="job-progress-bar">
+                      <div
+                        className="job-progress-fill"
+                        style={{ width: `${Math.min(100, Math.max(0, (job.current_chapter / job.total_chapters) * 100))}%` }}
+                      />
+                    </div>
+                    <strong>{Math.round((job.current_chapter / job.total_chapters) * 100)}%</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <BatchPanel
+            batches={detail.batches}
+            selectedBatch={selectedBatch}
+            selectedBatchId={selectedBatchId}
+            onSelect={setSelectedBatchId}
+          />
+
+          <div className="content-grid workspace-main-grid">
+            <ModelConfig
+              draft={profileDraft}
+              setDraft={setProfileDraft}
+              selectedProfile={selectedProfile}
+              selectedProfileId={selectedProfileId}
+              suggestions={detectedModelSuggestions}
+              suggestionsOpen={openModelSuggestions}
+              busy={busy}
+              processing={processingTaskActive}
+              savedApiKeyMask={savedApiKeyMask}
+              onSuggestionsOpenChange={setOpenModelSuggestions}
+              onCreate={createNewModelProfile}
+              onDiagnose={diagnoseProfile}
+              onSave={saveProfile}
+            />
+            <ChapterList
+              chapters={detail.chapters}
+              selectedChapterId={selectedChapterId}
+              onSelect={setSelectedChapterId}
+              displayTitle={displayChapterTitle}
+              statusText={statusText}
+            />
+          </div>
+        </div>
+      )}
+
+      {activeView === "workspace" && !detail && (
+        <div className="workspace">
+          <div className="page-panel" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ textAlign: "center" }}>
+              <BookOpen size={48} style={{ color: "#ccc", marginBottom: "16px" }} />
+              <h2>欢迎使用 NovelProcessor</h2>
+              <p style={{ color: "#666", marginBottom: "16px" }}>请导入 TXT 小说文件开始处理</p>
+              <button onClick={importTxt}>
+                <FilePlus2 size={16} />导入小说
               </button>
             </div>
-            <div className="modal-body">
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 500 }}>
-                  配置名称
-                </label>
-                <input
-                  type="text"
-                  value={modelDraft.name}
-                  onChange={(e) => setModelDraft({ ...modelDraft, name: e.target.value })}
-                  placeholder="例如: DeepSeek V3"
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }}
-                />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 500 }}>
-                  API 地址
-                </label>
-                <input
-                  type="text"
-                  value={modelDraft.base_url}
-                  onChange={(e) => setModelDraft({ ...modelDraft, base_url: e.target.value })}
-                  placeholder="https://api.openai.com/v1"
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }}
-                />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 500 }}>
-                  模型名称
-                </label>
-                <input
-                  type="text"
-                  value={modelDraft.model}
-                  onChange={(e) => setModelDraft({ ...modelDraft, model: e.target.value })}
-                  placeholder="gpt-4o-mini"
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }}
-                />
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 500 }}>
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={modelDraft.api_key}
-                  onChange={(e) => setModelDraft({ ...modelDraft, api_key: e.target.value })}
-                  placeholder="sk-..."
-                  style={{ width: '100%', padding: '8px 12px', border: '1px solid #d0d0d0', borderRadius: '4px', fontSize: '13px' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
-                <button onClick={() => setShowModelDialog(false)}>取消</button>
-                <button
-                  className="primary-button"
-                  onClick={saveModelProfile}
-                  disabled={!modelDraft.name || !modelDraft.model || !!busy}
+          </div>
+        </div>
+      )}
+
+      {activeView === "settings" && (
+        <div className="page-panel">
+          <div className="page-heading">
+            <h2>设置</h2>
+          </div>
+          <div className="settings-section">
+            <h3>应用设置</h3>
+            <div className="setting-row">
+              <label>
+                批次大小
+                <select
+                  value={settings.chapter_batch_size ?? 30}
+                  onChange={(event) => {
+                    const value = Number(event.target.value) as 30 | 50 | 100;
+                    setSettings({ ...settings, chapter_batch_size: value });
+                    void invoke("save_app_settings", { settings: { ...settings, chapter_batch_size: value } });
+                  }}
                 >
-                  保存
-                </button>
-              </div>
+                  <option value={30}>30 章</option>
+                  <option value={50}>50 章</option>
+                  <option value={100}>100 章</option>
+                </select>
+              </label>
             </div>
-          </dialog>
-        )}
-      </div>
-    </ErrorBoundary>
+          </div>
+        </div>
+      )}
+
+      {modelDiagnosis && (
+        <div className="diagnosis-panel">
+          <div className="diagnosis-heading">
+            <strong>模型诊断结果</strong>
+            <button className="icon-button" onClick={() => setModelDiagnosis(null)}>
+              <X size={14} />
+            </button>
+          </div>
+          {modelDiagnosis.recommended_thinking_mode && (
+            <p className="diagnosis-recommendation">
+              建议思考模式: {modelDiagnosis.recommended_thinking_mode}
+            </p>
+          )}
+          <div className="diagnosis-list">
+            {modelDiagnosis.checks.map((check, index) => (
+              <div key={index} className="diagnosis-item">
+                <StatusBadge status={check.status} label={check.status} />
+                <div>
+                  <strong>{check.name}</strong>
+                  <p>{check.message}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {dragActive && (
+        <div className="drop-import-overlay">
+          <div className="drop-import-card">
+            <FilePlus2 size={32} />
+            <strong>拖放 TXT 文件到此处</strong>
+            <span>松开以导入小说</span>
+          </div>
+        </div>
+      )}
+
+      {novelPendingDeletion && (
+        <DeleteNovelDialog
+          busy={busy === "delete-novel"}
+          novel={novelPendingDeletion}
+          onCancel={() => setNovelPendingDeletion(null)}
+          onConfirm={confirmDeleteNovel}
+        />
+      )}
+    </div>
   );
 }
