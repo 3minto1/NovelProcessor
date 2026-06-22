@@ -110,3 +110,37 @@ pub(crate) fn delete_chapters_by_novel(conn: &Connection, novel_id: &str) -> Res
         .map_err(|error| error.to_string())?;
     Ok(())
 }
+
+pub(crate) fn update_chapter_text(
+    conn: &Connection,
+    chapter_id: &str,
+    title: &str,
+    original_text: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE chapters SET title = ?1, original_text = ?2
+         WHERE id = ?3",
+        params![title, original_text, chapter_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn delete_chapter(conn: &Connection, chapter_id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM chapters WHERE id = ?1", params![chapter_id])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub(crate) fn toggle_chapter_validity(
+    conn: &Connection,
+    chapter_id: &str,
+    is_valid: bool,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE chapters SET is_valid = ?1 WHERE id = ?2",
+        params![is_valid as i64, chapter_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}

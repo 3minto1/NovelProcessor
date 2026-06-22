@@ -441,6 +441,48 @@ export default function App() {
     return title || `第 ${chapter.index} 章`;
   }
 
+  async function handleUpdateChapter(chapterId: string, title: string, text: string) {
+    if (!detail) return;
+    setBusy("update-chapter");
+    try {
+      await invoke("update_chapter_text", { chapterId, title, originalText: text });
+      await loadNovel(detail.novel.id);
+      showNotice("章节已更新");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleDeleteChapter(chapterId: string) {
+    if (!detail) return;
+    setBusy("delete-chapter");
+    try {
+      await invoke("delete_chapter", { chapterId });
+      await loadNovel(detail.novel.id);
+      showNotice("章节已删除");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleToggleValidity(chapterId: string, isValid: boolean) {
+    if (!detail) return;
+    setBusy("toggle-validity");
+    try {
+      await invoke("toggle_chapter_validity", { chapterId, isValid });
+      await loadNovel(detail.novel.id);
+      showNotice(isValid ? "章节已标记为有效" : "章节已标记为无效");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   const validChapters = detail?.chapters.filter((c) => c.is_valid) ?? [];
   const invalidChapters = detail?.chapters.filter((c) => !c.is_valid) ?? [];
 
@@ -606,6 +648,9 @@ export default function App() {
               onSelect={setSelectedChapterId}
               displayTitle={displayChapterTitle}
               statusText={statusText}
+              onUpdateChapter={handleUpdateChapter}
+              onDeleteChapter={handleDeleteChapter}
+              onToggleValidity={handleToggleValidity}
             />
           </div>
         </div>

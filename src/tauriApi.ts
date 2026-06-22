@@ -15,6 +15,15 @@ type CommandMap = {
   get_novel_detail: { args: { novelId: string }; result: NovelDetail };
   import_txt: { args: { filePath: string }; result: Novel };
   delete_novel: { args: { novelId: string }; result: void };
+  update_chapter_text: {
+    args: { chapterId: string; title: string; originalText: string };
+    result: void;
+  };
+  delete_chapter: { args: { chapterId: string }; result: void };
+  toggle_chapter_validity: {
+    args: { chapterId: string; isValid: boolean };
+    result: void;
+  };
   list_model_profiles: { args?: undefined; result: ModelProfile[] };
   save_model_profile: {
     args: {
