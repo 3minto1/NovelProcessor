@@ -31,7 +31,7 @@ pub(crate) async fn start_validation(
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
-        let batch_size = 10;
+        let batch_size = 1000;
         let mut processed = 0;
 
         for batch in chapters.chunks(batch_size) {

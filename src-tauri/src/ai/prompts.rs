@@ -1,37 +1,32 @@
 use crate::domain::Chapter;
 
 pub(crate) fn build_batch_validation_prompt(chapters: &[Chapter]) -> String {
-    let chapters_text = chapters
+    let chapter_list = chapters
         .iter()
-        .map(|chapter| {
-            format!(
-                "=== 章节 {} (ID:{}) : {} ===\n{}",
-                chapter.index,
-                chapter.id,
-                chapter.title,
-                truncate_text(&chapter.original_text, 8000)
-            )
-        })
+        .map(|chapter| format!("{}. {}", chapter.index, chapter.title))
         .collect::<Vec<_>>()
-        .join("\n\n");
+        .join("\n");
 
     format!(
-        r#"你是一位专业的小说内容分析师。请批量分析以下章节文本，判断每个章节是否为有效的小说内容。
+        r#"你是一位专业的小说内容分析师。以下是从小说中通过正则识别出的章节目录列表。请判断哪些是有效的章节标题，哪些不是。
 
-有效章节：包含实际叙事、人物互动、情节推进的故事内容
-无效章节：仅包含作者笔记、更新通知、目录、广告、空白文本、装饰分隔线、版权声明
+有效的章节标题：实际的小说章节（如"第1章 xxx"、"Chapter 1 xxx"、"序章"、"楔子"等）
+无效的内容：作者笔记标题、更新通知、广告、目录页标题、装饰性文字、乱码等
 
-请输出JSON数组，每个元素对应输入中的一个章节，按顺序排列：
+请输出JSON数组，按顺序对应每个输入的章节：
 [
   {{"chapter_id": "章节ID", "is_valid": true/false, "reason": "简要说明"}},
   ...
 ]
 
-重要：输出必须是纯JSON数组，不要添加任何其他文本或Markdown标记。
+重要：
+- 输出必须是纯JSON数组
+- 按输入顺序排列
+- 每个元素必须包含chapter_id、is_valid、reason三个字段
 
-待分析章节：
+章节目录：
 {}"#,
-        chapters_text
+        chapter_list
     )
 }
 
@@ -64,9 +59,7 @@ pub(crate) fn build_batch_review_prompt(chapters: &[Chapter]) -> String {
 3. **语法问题** - 修正不通顺的句子、语法错误、标点符号错误
 4. **格式问题** - 修复断行、缺失标点或乱码文本
 
-对于每一章，请输出：
-- 修正后的完整章节文本
-- 如果有修改，简要说明修改了什么
+对于每一章，请输出修正后的完整章节文本。
 
 输出格式（每章一个区块）：
 <<<CHAPTER_START index=N>>>
