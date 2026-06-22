@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   BookOpen,
   CheckCircle2,
+  ClipboardList,
   Download,
   FilePlus2,
   Loader2,
@@ -14,6 +15,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DeleteNovelDialog } from "./components/common/DeleteNovelDialog";
 import { getStatusTone, StatusBadge } from "./components/common/StatusBadge";
+import { LogsPage } from "./components/pages/LogsPage";
 import { ModelProfiles } from "./components/Settings/ModelProfiles";
 import { BatchPanel } from "./components/Workspace/BatchPanel";
 import { ChapterList } from "./components/Workspace/ChapterList";
@@ -36,7 +38,7 @@ import type {
   NovelDetail
 } from "./types";
 
-type View = "workspace" | "settings";
+type View = "workspace" | "settings" | "logs";
 
 const savedApiKeyMask = "********";
 
@@ -70,6 +72,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>({});
   const [modelDiagnosis, setModelDiagnosis] = useState<ModelDiagnosis | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [logs, setLogs] = useState<any[]>([]);
   const detailRef = useRef<NovelDetail | null>(null);
   const busyRef = useRef("");
   const importInProgressRef = useRef(false);
@@ -181,6 +184,32 @@ export default function App() {
     setDetail(next);
     setSelectedChapterId(next.chapters[0]?.id ?? "");
     setSelectedBatchId(next.batches[0]?.id ?? "");
+    await refreshLogs(novelId);
+  }
+
+  async function refreshLogs(novelId = detail?.novel.id) {
+    try {
+      const rows = await invoke("list_ai_logs", { novelId: novelId ?? null });
+      setLogs(rows);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function clearLogs() {
+    const targetText = detail ? `《${detail.novel.title}》相关日志和全局日志` : "所有日志";
+    if (!window.confirm(`清空${targetText}？`)) return;
+    setBusy("clear-logs");
+    setNotice("");
+    try {
+      await invoke("clear_ai_logs", { novelId: detail?.novel.id ?? null });
+      await refreshLogs();
+      showNotice("日志已清空。");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
   }
 
   function isTxtFilePath(filePath: string) {
@@ -564,6 +593,19 @@ export default function App() {
           />
         </div>
 
+        <div className="side-section">
+          <button
+            className={`nav-button ${activeView === "logs" ? "active" : ""}`}
+            onClick={() => {
+              setActiveView("logs");
+              void refreshLogs();
+            }}
+          >
+            <ClipboardList size={16} />
+            日志
+          </button>
+        </div>
+
         <div className="sidebar-spacer" />
       </aside>
 
@@ -629,6 +671,37 @@ export default function App() {
             onSelect={setSelectedBatchId}
           />
 
+          {modelDiagnosis && (
+            <div className={`diagnosis-panel diagnosis-top-panel status-container status-${getStatusTone(modelDiagnosis.status)}`}>
+              <div className="diagnosis-heading">
+                <strong>诊断结果</strong>
+                <StatusBadge status={modelDiagnosis.status} label={modelDiagnosis.status} />
+                {modelDiagnosis.recommended_thinking_mode && (
+                  <span className="diagnosis-recommendation">建议思考模式：{modelDiagnosis.recommended_thinking_mode}</span>
+                )}
+                <button
+                  className="icon-button diagnosis-close"
+                  type="button"
+                  aria-label="关闭诊断结果"
+                  onClick={() => setModelDiagnosis(null)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="diagnosis-list">
+                {modelDiagnosis.checks.map((check) => (
+                  <div className="diagnosis-item" key={`${check.name}-${check.message}`}>
+                    <StatusBadge status={check.status} label={check.status} showDot={false} />
+                    <div>
+                      <strong>{check.name}</strong>
+                      <p>{check.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="content-grid workspace-main-grid">
             <ModelConfig
               draft={profileDraft}
@@ -656,33 +729,6 @@ export default function App() {
               onToggleValidity={handleToggleValidity}
             />
           </div>
-
-          {modelDiagnosis && (
-            <div className="diagnosis-panel" style={{ margin: "12px 0 0" }}>
-              <div className="diagnosis-heading">
-                <strong>模型诊断结果</strong>
-                <button className="icon-button" onClick={() => setModelDiagnosis(null)}>
-                  <X size={14} />
-                </button>
-              </div>
-              {modelDiagnosis.recommended_thinking_mode && (
-                <p className="diagnosis-recommendation">
-                  建议思考模式: {modelDiagnosis.recommended_thinking_mode}
-                </p>
-              )}
-              <div className="diagnosis-list">
-                {modelDiagnosis.checks.map((check, index) => (
-                  <div key={index} className="diagnosis-item">
-                    <StatusBadge status={check.status} label={check.status} />
-                    <div>
-                      <strong>{check.name}</strong>
-                      <p>{check.message}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -727,6 +773,16 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {activeView === "logs" && (
+        <LogsPage
+          logs={logs}
+          busy={busy}
+          onBack={() => setActiveView("workspace")}
+          onClear={clearLogs}
+          onRefresh={() => refreshLogs()}
+        />
       )}
 
       {dragActive && (
