@@ -441,13 +441,16 @@ export default function App() {
     return title || `第 ${chapter.index} 章`;
   }
 
-  async function handleUpdateChapter(chapterId: string, title: string, text: string) {
+  async function handleUpdateChapter(chapterId: string, title: string) {
     if (!detail) return;
     setBusy("update-chapter");
     try {
-      await invoke("update_chapter_text", { chapterId, title, originalText: text });
+      const chapter = detail.chapters.find(c => c.id === chapterId);
+      if (chapter) {
+        await invoke("update_chapter_text", { chapterId, title, originalText: chapter.original_text });
+      }
       await loadNovel(detail.novel.id);
-      showNotice("章节已更新");
+      showNotice("章节标题已更新");
     } catch (error) {
       showNotice(String(error));
     } finally {
@@ -653,6 +656,33 @@ export default function App() {
               onToggleValidity={handleToggleValidity}
             />
           </div>
+
+          {modelDiagnosis && (
+            <div className="diagnosis-panel" style={{ margin: "12px 0 0" }}>
+              <div className="diagnosis-heading">
+                <strong>模型诊断结果</strong>
+                <button className="icon-button" onClick={() => setModelDiagnosis(null)}>
+                  <X size={14} />
+                </button>
+              </div>
+              {modelDiagnosis.recommended_thinking_mode && (
+                <p className="diagnosis-recommendation">
+                  建议思考模式: {modelDiagnosis.recommended_thinking_mode}
+                </p>
+              )}
+              <div className="diagnosis-list">
+                {modelDiagnosis.checks.map((check, index) => (
+                  <div key={index} className="diagnosis-item">
+                    <StatusBadge status={check.status} label={check.status} />
+                    <div>
+                      <strong>{check.name}</strong>
+                      <p>{check.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -695,33 +725,6 @@ export default function App() {
                 </select>
               </label>
             </div>
-          </div>
-        </div>
-      )}
-
-      {modelDiagnosis && (
-        <div className="diagnosis-panel">
-          <div className="diagnosis-heading">
-            <strong>模型诊断结果</strong>
-            <button className="icon-button" onClick={() => setModelDiagnosis(null)}>
-              <X size={14} />
-            </button>
-          </div>
-          {modelDiagnosis.recommended_thinking_mode && (
-            <p className="diagnosis-recommendation">
-              建议思考模式: {modelDiagnosis.recommended_thinking_mode}
-            </p>
-          )}
-          <div className="diagnosis-list">
-            {modelDiagnosis.checks.map((check, index) => (
-              <div key={index} className="diagnosis-item">
-                <StatusBadge status={check.status} label={check.status} />
-                <div>
-                  <strong>{check.name}</strong>
-                  <p>{check.message}</p>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}

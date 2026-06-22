@@ -14,7 +14,7 @@ type ChapterListProps = {
   onSelect: (chapterId: string) => void;
   displayTitle: (chapter: Chapter) => string;
   statusText: Record<string, string>;
-  onUpdateChapter?: (chapterId: string, title: string, text: string) => void;
+  onUpdateChapter?: (chapterId: string, title: string) => void;
   onDeleteChapter?: (chapterId: string) => void;
   onToggleValidity?: (chapterId: string, isValid: boolean) => void;
 };
@@ -23,74 +23,78 @@ type ChapterRowProps = Pick<ChapterListProps, "chapters" | "selectedChapterId" |
 
 type ChapterButtonProps = Omit<ChapterRowProps, "chapters"> & {
   chapter: Chapter;
-  buttonRef?: (node: HTMLButtonElement | null) => void;
+  buttonRef?: (node: HTMLDivElement | null) => void;
 };
 
 const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity, buttonRef }: ChapterButtonProps) {
   const title = `${chapter.index}. ${displayTitle(chapter)}`;
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(chapter.title);
-  const [editText, setEditText] = useState(chapter.original_text);
 
   function handleSave() {
     if (onUpdateChapter) {
-      onUpdateChapter(chapter.id, editTitle, editText);
+      onUpdateChapter(chapter.id, editTitle);
     }
     setIsEditing(false);
   }
 
   function handleCancel() {
     setEditTitle(chapter.title);
-    setEditText(chapter.original_text);
     setIsEditing(false);
   }
 
   if (isEditing) {
     return (
-      <div className="chapter-item active" style={{ flexDirection: "column", gap: "8px", height: "auto", padding: "12px" }}>
-        <input
-          value={editTitle}
-          onChange={(e) => setEditTitle(e.target.value)}
-          style={{ width: "100%", padding: "6px", fontSize: "14px" }}
-          placeholder="章节标题"
-        />
-        <textarea
-          value={editText}
-          onChange={(e) => setEditText(e.target.value)}
-          style={{ width: "100%", minHeight: "100px", padding: "6px", fontSize: "13px", resize: "vertical" }}
-          placeholder="章节内容"
-        />
-        <div style={{ display: "flex", gap: "8px" }}>
-          <button onClick={handleSave} className="action-primary" style={{ fontSize: "12px", padding: "4px 12px" }}>
+      <div className="chapter-item active" style={{ flexDirection: "column", gap: "8px", height: "auto", minHeight: "100px", padding: "10px" }}>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <input
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            style={{ flex: 1, padding: "6px", fontSize: "14px" }}
+            placeholder="章节标题"
+            autoFocus
+          />
+          <button onClick={handleSave} className="action-primary" style={{ fontSize: "12px", padding: "4px 10px", minHeight: "auto" }}>
             保存
           </button>
-          <button onClick={handleCancel} style={{ fontSize: "12px", padding: "4px 12px" }}>
+          <button onClick={handleCancel} style={{ fontSize: "12px", padding: "4px 10px", minHeight: "auto" }}>
             取消
           </button>
+        </div>
+        <div style={{ display: "flex", gap: "4px" }}>
+          <StatusBadge
+            status={chapter.validation_status}
+            label={statusText[chapter.validation_status] ?? chapter.validation_status}
+          />
+          <StatusBadge
+            status={chapter.review_status}
+            label={statusText[chapter.review_status] ?? chapter.review_status}
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <button
+    <div
       ref={buttonRef}
       className={selectedChapterId === chapter.id ? "chapter-item active" : "chapter-item"}
-      onClick={() => onSelect(chapter.id)}
-      title={title}
+      style={{ cursor: "pointer" }}
     >
-      <span className="chapter-title">{title}</span>
-      <span className="chapter-status-row">
-        <StatusBadge
-          status={chapter.validation_status}
-          label={`验证 ${statusText[chapter.validation_status] ?? chapter.validation_status}`}
-        />
-        <StatusBadge
-          status={chapter.review_status}
-          label={`审查 ${statusText[chapter.review_status] ?? chapter.review_status}`}
-        />
-      </span>
-      <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+      <div onClick={() => onSelect(chapter.id)} style={{ flex: 1, minWidth: 0 }}>
+        <span className="chapter-title">{title}</span>
+        <span className="chapter-status-row">
+          <StatusBadge
+            status={chapter.validation_status}
+            label={statusText[chapter.validation_status] ?? chapter.validation_status}
+          />
+          <StatusBadge
+            status={chapter.review_status}
+            label={statusText[chapter.review_status] ?? chapter.review_status}
+          />
+        </span>
+      </div>
+      <div className="chapter-actions">
         {onUpdateChapter && (
           <button
             className="icon-button"
@@ -98,10 +102,22 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
               e.stopPropagation();
               setIsEditing(true);
             }}
-            title="编辑章节"
-            style={{ padding: "2px", minHeight: "auto" }}
+            title="编辑标题"
           >
             <Pencil size={12} />
+          </button>
+        )}
+        {onToggleValidity && (
+          <button
+            className="icon-button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleValidity(chapter.id, !chapter.is_valid);
+            }}
+            title={chapter.is_valid ? "标记为无效" : "标记为有效"}
+            style={{ color: chapter.is_valid ? "#e74c3c" : "#27ae60" }}
+          >
+            {chapter.is_valid ? "无效" : "有效"}
           </button>
         )}
         {onDeleteChapter && (
@@ -114,30 +130,12 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
               }
             }}
             title="删除章节"
-            style={{ padding: "2px", minHeight: "auto" }}
           >
             <Trash2 size={12} />
           </button>
         )}
-        {onToggleValidity && (
-          <button
-            className="icon-button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleValidity(chapter.id, !chapter.is_valid);
-            }}
-            title={chapter.is_valid ? "标记为无效" : "标记为有效"}
-            style={{ 
-              padding: "2px", 
-              minHeight: "auto",
-              color: chapter.is_valid ? "#e74c3c" : "#27ae60"
-            }}
-          >
-            {chapter.is_valid ? "标记无效" : "标记有效"}
-          </button>
-        )}
       </div>
-    </button>
+    </div>
   );
 });
 
@@ -159,7 +157,7 @@ function isIntegerQuery(value: string) {
 
 export const ChapterList = memo(function ChapterList({ chapters, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity }: ChapterListProps) {
   const listRef = useListRef(null);
-  const selectedButtonRef = useRef<HTMLButtonElement | null>(null);
+  const selectedButtonRef = useRef<HTMLDivElement | null>(null);
   const [jumpQuery, setJumpQuery] = useState("");
   const [showInvalidOnly, setShowInvalidOnly] = useState(false);
   const normalizedJumpQuery = normalizeQuery(jumpQuery);
@@ -251,7 +249,7 @@ export const ChapterList = memo(function ChapterList({ chapters, selectedChapter
           <input
             aria-label="搜索章节"
             className="chapter-jump-input"
-            placeholder="搜索章号/标题"
+            placeholder="搜索"
             value={jumpQuery}
             onChange={(event) => setJumpQuery(event.target.value)}
             onKeyDown={(event) => {
