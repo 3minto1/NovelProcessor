@@ -144,6 +144,7 @@ export default function App() {
         
         if (updatedJob.status === "completed" || updatedJob.status === "failed") {
           clearInterval(interval);
+          setBusy("");
           if (detail) {
             await loadNovel(detail.novel.id);
           }
@@ -420,7 +421,6 @@ export default function App() {
       showNotice(result.message);
     } catch (error) {
       showNotice(String(error));
-    } finally {
       setBusy("");
     }
   }
@@ -430,6 +430,7 @@ export default function App() {
     try {
       await invoke("cancel_validation");
       showNotice("验证已终止");
+      setBusy("");
     } catch (error) {
       showNotice(String(error));
     }
