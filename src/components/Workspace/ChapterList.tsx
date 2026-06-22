@@ -85,13 +85,14 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
         <span className="chapter-title">{title}</span>
         <span className="chapter-status-row">
           <StatusBadge
-            status={chapter.validation_status}
-            label={statusText[chapter.validation_status] ?? chapter.validation_status}
+            status={chapter.is_valid ? "ok" : "danger"}
+            label={chapter.is_valid ? "有效" : "无效"}
           />
-          <StatusBadge
-            status={chapter.review_status}
-            label={statusText[chapter.review_status] ?? chapter.review_status}
-          />
+          {chapter.validation_reason && (
+            <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "200px" }} title={chapter.validation_reason}>
+              {chapter.validation_reason}
+            </span>
+          )}
         </span>
       </div>
       <div className="chapter-actions">

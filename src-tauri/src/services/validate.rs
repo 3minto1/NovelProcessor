@@ -62,21 +62,35 @@ pub(crate) async fn validate_batch(
     let value: serde_json::Value = serde_json::from_str(&output.text)
         .map_err(|e| format!("无法解析AI响应：{}", e))?;
 
-    let results_arr = value.as_array()
-        .ok_or_else(|| "AI响应不是JSON数组".to_string())?;
+    // Try to parse as array first, then as object with "results" key
+    let results_arr = if let Some(arr) = value.as_array() {
+        arr.clone()
+    } else if let Some(arr) = value.get("results").and_then(|v| v.as_array()) {
+        arr.clone()
+    } else {
+        // If AI returned a single object, wrap it in an array
+        vec![value.clone()]
+    };
 
     let mut results = Vec::new();
-    for (i, chapter) in chapters.iter().enumerate() {
-        let item = results_arr.get(i);
-        let is_valid = item
-            .and_then(|v| v.get("is_valid"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        let reason = item
-            .and_then(|v| v.get("reason"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        results.push((chapter.id.clone(), is_valid, reason));
+
+    // First try to match by chapter_id if present
+    for chapter in chapters {
+        let mut found = false;
+        for item in &results_arr {
+            let item_id = item.get("chapter_id").and_then(|v| v.as_str());
+            if item_id == Some(&chapter.id) {
+                let is_valid = item.get("is_valid").and_then(|v| v.as_bool()).unwrap_or(true);
+                let reason = item.get("reason").and_then(|v| v.as_str()).map(|s| s.to_string());
+                results.push((chapter.id.clone(), is_valid, reason));
+                found = true;
+                break;
+            }
+        }
+        // If not found by ID, default to valid
+        if !found {
+            results.push((chapter.id.clone(), true, None));
+        }
     }
 
     Ok(results)

@@ -145,8 +145,9 @@ export default function App() {
         if (updatedJob.status === "completed" || updatedJob.status === "failed") {
           clearInterval(interval);
           setBusy("");
-          if (detail) {
-            await loadNovel(detail.novel.id);
+          const currentDetail = detailRef.current;
+          if (currentDetail) {
+            await loadNovel(currentDetail.novel.id);
           }
         }
       } catch {
