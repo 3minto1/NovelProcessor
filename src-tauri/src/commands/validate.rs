@@ -46,6 +46,7 @@ pub(crate) async fn start_validation(
                 return Ok::<(), String>(());
             }
 
+            // Update progress at start of batch
             {
                 let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
                 let first = batch.first().map(|c| c.title.as_str()).unwrap_or("");
@@ -81,6 +82,17 @@ pub(crate) async fn start_validation(
             }
 
             processed += batch.len() as i64;
+
+            // Update progress after batch completes
+            {
+                let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+                crate::services::progress::update_job_progress(
+                    &conn,
+                    &job_id,
+                    processed,
+                    &format!("已验证 {} / {} 章", processed, chapters.len()),
+                )?;
+            }
         }
 
         let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
