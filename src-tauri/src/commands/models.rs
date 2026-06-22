@@ -39,34 +39,57 @@ pub(crate) async fn list_model_profiles(
 #[tauri::command]
 pub(crate) async fn save_model_profile(
     state: State<'_, AppState>,
-    name: String,
-    provider: String,
-    base_url: String,
-    model: String,
-    temperature: f64,
-    top_p: f64,
-    thinking_mode: String,
-    api_key: Option<String>,
+    input: ModelProfileInput,
 ) -> Result<ModelProfile, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let id = Uuid::new_v4().to_string();
+    
+    let id = input.id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let now = chrono::Utc::now().to_rfc3339();
+    let api_key = input.api_key.as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "********")
+        .map(str::to_string);
     
     conn.execute(
         "INSERT INTO model_profiles (id, name, provider, base_url, model, temperature, top_p, thinking_mode, api_key, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        rusqlite::params![id, name, provider, base_url, model, temperature, top_p, thinking_mode, api_key, now],
-    ).map_err(|e| e.to_string())?;
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            provider = excluded.provider,
+            base_url = excluded.base_url,
+            model = excluded.model,
+            temperature = excluded.temperature,
+            top_p = excluded.top_p,
+            thinking_mode = excluded.thinking_mode,
+            api_key = CASE
+                WHEN ?9 IS NOT NULL THEN excluded.api_key
+                ELSE model_profiles.api_key
+            END,
+            updated_at = excluded.updated_at",
+        rusqlite::params![
+            id,
+            input.name,
+            input.provider,
+            input.base_url,
+            input.model,
+            input.temperature,
+            input.top_p,
+            input.thinking_mode,
+            api_key,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     
     Ok(ModelProfile {
         id,
-        name,
-        provider,
-        base_url,
-        model,
-        temperature,
-        top_p,
-        thinking_mode,
+        name: input.name,
+        provider: input.provider,
+        base_url: input.base_url,
+        model: input.model,
+        temperature: input.temperature,
+        top_p: input.top_p,
+        thinking_mode: input.thinking_mode,
         has_api_key: api_key.is_some(),
         api_key_storage: "database".to_string(),
         updated_at: now,
@@ -116,7 +139,6 @@ pub(crate) async fn diagnose_model_profile(
     
     let mut checks = Vec::new();
     
-    // Check API key
     if profile.has_api_key {
         checks.push(crate::domain::DiagnosisCheck {
             name: "API Key".to_string(),
@@ -131,7 +153,6 @@ pub(crate) async fn diagnose_model_profile(
         });
     }
     
-    // Check base URL
     if !profile.base_url.is_empty() {
         checks.push(crate::domain::DiagnosisCheck {
             name: "Base URL".to_string(),
@@ -146,7 +167,6 @@ pub(crate) async fn diagnose_model_profile(
         });
     }
     
-    // Check model
     if !profile.model.is_empty() && profile.model != "请填写模型名" {
         checks.push(crate::domain::DiagnosisCheck {
             name: "模型名称".to_string(),
@@ -183,23 +203,16 @@ pub(crate) async fn list_ai_logs(
 ) -> Result<Vec<AiLog>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     
-    let (query, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match &novel_id {
-        Some(id) => (
-            "SELECT id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, created_at
-             FROM ai_logs WHERE novel_id = ?1 ORDER BY created_at DESC".to_string(),
-            vec![Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>],
-        ),
-        None => (
-            "SELECT id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, created_at
-             FROM ai_logs ORDER BY created_at DESC".to_string(),
-            vec![],
-        ),
-    };
+    let mut rows = Vec::new();
     
-    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-    let params_ref: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-    let rows = stmt
-        .query_map(params_ref.as_slice(), |row| {
+    if let Some(id) = &novel_id {
+        let mut stmt = conn.prepare(
+            "SELECT id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, created_at
+             FROM ai_logs WHERE novel_id = ?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+        
+        let mapped = stmt.query_map(rusqlite::params![id], |row| {
             Ok(AiLog {
                 id: row.get(0)?,
                 novel_id: row.get(1)?,
@@ -216,7 +229,37 @@ pub(crate) async fn list_ai_logs(
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        
+        rows = mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    } else {
+        let mut stmt = conn.prepare(
+            "SELECT id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, created_at
+             FROM ai_logs ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+        
+        let mapped = stmt.query_map([], |row| {
+            Ok(AiLog {
+                id: row.get(0)?,
+                novel_id: row.get(1)?,
+                profile_id: row.get(2)?,
+                action: row.get(3)?,
+                chapter_title: row.get(4)?,
+                status: row.get(5)?,
+                content: row.get(6)?,
+                reasoning: row.get(7)?,
+                raw_response: row.get(8)?,
+                input_tokens: None,
+                output_tokens: None,
+                created_at: row.get(9)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+        
+        rows = mapped.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+    }
+    
+    Ok(rows)
 }
 
 #[tauri::command]
@@ -238,4 +281,17 @@ pub(crate) async fn clear_ai_logs(
     }
     
     Ok(())
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelProfileInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub thinking_mode: String,
+    pub api_key: Option<String>,
 }

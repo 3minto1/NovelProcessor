@@ -63,8 +63,6 @@ export type ProfileDraft = {
   api_key: string;
 };
 
-export type ModelProfileInput = Omit<ProfileDraft, "api_key"> & { api_key?: string };
-
 export type Job = {
   id: string;
   novel_id: string;

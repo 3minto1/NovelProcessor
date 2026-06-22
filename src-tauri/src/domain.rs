@@ -125,3 +125,16 @@ pub struct ModelDiagnosis {
     pub recommended_thinking_mode: Option<String>,
     pub checks: Vec<DiagnosisCheck>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelProfileInput {
+    pub id: Option<String>,
+    pub name: String,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub thinking_mode: String,
+    pub api_key: Option<String>,
+}
