@@ -53,6 +53,7 @@ type CommandMap = {
   is_validation_active: { args?: undefined; result: boolean };
   start_review: { args: { novelId: string; profileId: string }; result: Job };
   export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
+  export_chapter_directory: { args: { novelId: string; outputPath: string }; result: void };
   get_job: { args: { jobId: string }; result: Job };
   record_frontend_error: {
     args: { message: string; stack: string | null; componentStack: string | null };

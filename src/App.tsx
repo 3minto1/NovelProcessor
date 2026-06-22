@@ -519,6 +519,26 @@ export default function App() {
     }
   }
 
+  async function handleExportDirectory(_chaptersToExport: Chapter[]) {
+    setNotice("");
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected !== "string") return;
+      
+      const fileName = detail ? `${detail.novel.title}_章节目录.txt` : "章节目录.txt";
+      const outputPath = selected + "\\" + fileName;
+      
+      await invoke("export_chapter_directory", {
+        novelId: detail!.novel.id,
+        outputPath
+      });
+      
+      showNotice(`章节目录已导出: ${outputPath}`);
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
   const validChapters = detail?.chapters.filter((c) => c.is_valid) ?? [];
   const invalidChapters = detail?.chapters.filter((c) => !c.is_valid) ?? [];
 
@@ -730,6 +750,7 @@ export default function App() {
               onUpdateChapter={handleUpdateChapter}
               onDeleteChapter={handleDeleteChapter}
               onToggleValidity={handleToggleValidity}
+              onExportDirectory={handleExportDirectory}
             />
           </div>
         </div>

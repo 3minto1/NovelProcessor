@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { List, useListRef, type RowComponentProps } from "react-window";
-import { Filter, Pencil, Trash2 } from "lucide-react";
+import { Download, Filter, Pencil, Trash2 } from "lucide-react";
 import type { Chapter } from "../../types";
 import { ScrollablePanel } from "../common/ScrollablePanel";
 import { StatusBadge } from "../common/StatusBadge";
@@ -16,6 +16,7 @@ type ChapterListProps = {
   onUpdateChapter?: (chapterId: string, title: string) => void;
   onDeleteChapter?: (chapterId: string) => void;
   onToggleValidity?: (chapterId: string, isValid: boolean) => void;
+  onExportDirectory?: (chapters: Chapter[]) => void;
 };
 
 type ChapterRowProps = Pick<ChapterListProps, "chapters" | "selectedChapterId" | "onSelect" | "displayTitle" | "onUpdateChapter" | "onDeleteChapter" | "onToggleValidity">;
@@ -165,7 +166,7 @@ function isIntegerQuery(value: string) {
   return /^\d+$/.test(value);
 }
 
-export const ChapterList = memo(function ChapterList({ chapters, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity }: ChapterListProps) {
+export const ChapterList = memo(function ChapterList({ chapters, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity, onExportDirectory }: ChapterListProps) {
   const listRef = useListRef(null);
   const selectedButtonRef = useRef<HTMLDivElement | null>(null);
   const [jumpQuery, setJumpQuery] = useState("");
@@ -245,6 +246,16 @@ export const ChapterList = memo(function ChapterList({ chapters, selectedChapter
       <div className="panel-heading chapter-list-heading">
         <h2>章节 ({visibleChapters.length})</h2>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          {onExportDirectory && (
+            <button
+              onClick={() => onExportDirectory(chapters)}
+              style={{ fontSize: "12px", padding: "4px 8px", minHeight: "auto" }}
+              title="导出章节目录"
+            >
+              <Download size={12} />
+              导出目录
+            </button>
+          )}
           {invalidCount > 0 && (
             <button
               className={showInvalidOnly ? "action-primary" : ""}

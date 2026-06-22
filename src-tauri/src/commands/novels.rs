@@ -52,7 +52,6 @@ pub(crate) async fn delete_chapter(
     chapter_id: String,
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    // Get novel_id before deletion
     let novel_id: String = conn.query_row(
         "SELECT novel_id FROM chapters WHERE id = ?1",
         rusqlite::params![chapter_id],
@@ -71,4 +70,32 @@ pub(crate) async fn toggle_chapter_validity(
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     crate::repositories::chapters::toggle_chapter_validity(&conn, &chapter_id, is_valid)
+}
+
+#[tauri::command]
+pub(crate) async fn export_chapter_directory(
+    state: State<'_, AppState>,
+    novel_id: String,
+    output_path: String,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let chapters = crate::repositories::chapters::list_chapters(&conn, &novel_id)?;
+    
+    let content: String = chapters
+        .iter()
+        .map(|ch| {
+            let title = ch.title.trim();
+            if title.is_empty() {
+                format!("第{}章", ch.index)
+            } else {
+                format!("{}. {}", ch.index, title)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    
+    std::fs::write(&output_path, &content)
+        .map_err(|error| format!("无法写入文件：{}", error))?;
+    
+    Ok(())
 }

@@ -53,6 +53,7 @@ pub fn run() {
             commands::novels::update_chapter_text,
             commands::novels::delete_chapter,
             commands::novels::toggle_chapter_validity,
+            commands::novels::export_chapter_directory,
             commands::validate::start_validation,
             commands::validate::cancel_validation,
             commands::validate::is_validation_active,
