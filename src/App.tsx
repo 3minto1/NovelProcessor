@@ -42,14 +42,6 @@ type View = "workspace" | "settings" | "logs";
 
 const savedApiKeyMask = "********";
 
-const statusText: Record<string, string> = {
-  pending: "待处理",
-  running: "进行中",
-  completed: "完成",
-  failed: "失败",
-  imported: "已导入"
-};
-
 export default function App() {
   const {
     novels, setNovels, detail, setDetail, selectedChapterId, setSelectedChapterId,
@@ -735,7 +727,6 @@ export default function App() {
               selectedChapterId={selectedChapterId}
               onSelect={setSelectedChapterId}
               displayTitle={displayChapterTitle}
-              statusText={statusText}
               onUpdateChapter={handleUpdateChapter}
               onDeleteChapter={handleDeleteChapter}
               onToggleValidity={handleToggleValidity}

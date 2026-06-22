@@ -132,6 +132,21 @@ pub(crate) fn delete_chapter(conn: &Connection, chapter_id: &str) -> Result<(), 
     Ok(())
 }
 
+pub(crate) fn reindex_chapters(conn: &Connection, novel_id: &str) -> Result<(), String> {
+    let chapters = list_chapters(conn, novel_id)?;
+    for (i, chapter) in chapters.iter().enumerate() {
+        let new_index = (i + 1) as i64;
+        if chapter.index != new_index {
+            conn.execute(
+                "UPDATE chapters SET chapter_index = ?1 WHERE id = ?2",
+                params![new_index, chapter.id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn toggle_chapter_validity(
     conn: &Connection,
     chapter_id: &str,

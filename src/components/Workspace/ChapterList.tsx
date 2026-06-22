@@ -13,20 +13,19 @@ type ChapterListProps = {
   selectedChapterId?: string;
   onSelect: (chapterId: string) => void;
   displayTitle: (chapter: Chapter) => string;
-  statusText: Record<string, string>;
   onUpdateChapter?: (chapterId: string, title: string) => void;
   onDeleteChapter?: (chapterId: string) => void;
   onToggleValidity?: (chapterId: string, isValid: boolean) => void;
 };
 
-type ChapterRowProps = Pick<ChapterListProps, "chapters" | "selectedChapterId" | "onSelect" | "displayTitle" | "statusText" | "onUpdateChapter" | "onDeleteChapter" | "onToggleValidity">;
+type ChapterRowProps = Pick<ChapterListProps, "chapters" | "selectedChapterId" | "onSelect" | "displayTitle" | "onUpdateChapter" | "onDeleteChapter" | "onToggleValidity">;
 
 type ChapterButtonProps = Omit<ChapterRowProps, "chapters"> & {
   chapter: Chapter;
   buttonRef?: (node: HTMLDivElement | null) => void;
 };
 
-const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity, buttonRef }: ChapterButtonProps) {
+const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity, buttonRef }: ChapterButtonProps) {
   const title = `${chapter.index}. ${displayTitle(chapter)}`;
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(chapter.title);
@@ -62,14 +61,17 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
           </button>
         </div>
         <div style={{ display: "flex", gap: "4px" }}>
-          <StatusBadge
-            status={chapter.validation_status}
-            label={statusText[chapter.validation_status] ?? chapter.validation_status}
-          />
-          <StatusBadge
-            status={chapter.review_status}
-            label={statusText[chapter.review_status] ?? chapter.review_status}
-          />
+          {chapter.validation_status === "completed" ? (
+            <StatusBadge
+              status={chapter.is_valid ? "ok" : "danger"}
+              label={chapter.is_valid ? "有效" : "无效"}
+            />
+          ) : (
+            <StatusBadge
+              status="pending"
+              label="待验证"
+            />
+          )}
         </div>
       </div>
     );
@@ -84,10 +86,17 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
       <div onClick={() => onSelect(chapter.id)} style={{ flex: 1, minWidth: 0 }}>
         <span className="chapter-title">{title}</span>
         <span className="chapter-status-row">
-          <StatusBadge
-            status={chapter.is_valid ? "ok" : "danger"}
-            label={chapter.is_valid ? "有效" : "无效"}
-          />
+          {chapter.validation_status === "completed" ? (
+            <StatusBadge
+              status={chapter.is_valid ? "ok" : "danger"}
+              label={chapter.is_valid ? "有效" : "无效"}
+            />
+          ) : (
+            <StatusBadge
+              status="pending"
+              label="待验证"
+            />
+          )}
           {chapter.validation_reason && (
             <span style={{ fontSize: "11px", color: "#888", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "200px" }} title={chapter.validation_reason}>
               {chapter.validation_reason}
@@ -156,7 +165,7 @@ function isIntegerQuery(value: string) {
   return /^\d+$/.test(value);
 }
 
-export const ChapterList = memo(function ChapterList({ chapters, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity }: ChapterListProps) {
+export const ChapterList = memo(function ChapterList({ chapters, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity }: ChapterListProps) {
   const listRef = useListRef(null);
   const selectedButtonRef = useRef<HTMLDivElement | null>(null);
   const [jumpQuery, setJumpQuery] = useState("");
@@ -183,7 +192,7 @@ export const ChapterList = memo(function ChapterList({ chapters, selectedChapter
   
   const virtualized = visibleChapters.length >= CHAPTER_VIRTUALIZATION_THRESHOLD;
   const selectedIndex = useMemo(() => visibleChapters.findIndex((chapter) => chapter.id === selectedChapterId), [visibleChapters, selectedChapterId]);
-  const rowProps = useMemo(() => ({ chapters: visibleChapters, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity }), [visibleChapters, selectedChapterId, onSelect, displayTitle, statusText, onUpdateChapter, onDeleteChapter, onToggleValidity]);
+  const rowProps = useMemo(() => ({ chapters: visibleChapters, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity }), [visibleChapters, selectedChapterId, onSelect, displayTitle, onUpdateChapter, onDeleteChapter, onToggleValidity]);
   const firstMatch = visibleChapters[0] ?? null;
 
   function virtualListElement() {
@@ -281,7 +290,6 @@ export const ChapterList = memo(function ChapterList({ chapters, selectedChapter
               buttonRef={selectedChapterId === chapter.id ? (node) => { selectedButtonRef.current = node; } : undefined}
               onSelect={onSelect}
               displayTitle={displayTitle}
-              statusText={statusText}
               onUpdateChapter={onUpdateChapter}
               onDeleteChapter={onDeleteChapter}
               onToggleValidity={onToggleValidity}

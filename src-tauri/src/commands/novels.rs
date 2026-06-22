@@ -52,7 +52,15 @@ pub(crate) async fn delete_chapter(
     chapter_id: String,
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    crate::repositories::chapters::delete_chapter(&conn, &chapter_id)
+    // Get novel_id before deletion
+    let novel_id: String = conn.query_row(
+        "SELECT novel_id FROM chapters WHERE id = ?1",
+        rusqlite::params![chapter_id],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    crate::repositories::chapters::delete_chapter(&conn, &chapter_id)?;
+    crate::repositories::chapters::reindex_chapters(&conn, &novel_id)?;
+    Ok(())
 }
 
 #[tauri::command]
