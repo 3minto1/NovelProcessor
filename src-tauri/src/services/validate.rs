@@ -47,7 +47,7 @@ pub(crate) async fn validate_batch(
     chapters: &[Chapter],
 ) -> Result<Vec<(String, bool, Option<String>)>, String> {
     let prompt = build_batch_validation_prompt(chapters);
-    let system = "你是一位专业的小说内容分析师，专注于批量判断章节是否为有效的小说内容。你必须严格按JSON数组格式输出结果。";
+    let system = "你是一位小说目录分析专家。请按JSON数组格式输出结果，每个元素对应一个章节。";
 
     let output = crate::ai::common::generate_text(
         client,
@@ -59,36 +59,32 @@ pub(crate) async fn validate_batch(
         true,
     ).await?;
 
+    eprintln!("[validate_batch] AI response: {}", &output.text[..output.text.len().min(500)]);
+
     let value: serde_json::Value = serde_json::from_str(&output.text)
         .map_err(|e| format!("无法解析AI响应：{}", e))?;
 
-    // Try to parse as array first, then as object with "results" key
-    let results_arr = if let Some(arr) = value.as_array() {
-        arr.clone()
-    } else if let Some(arr) = value.get("results").and_then(|v| v.as_array()) {
-        arr.clone()
-    } else {
-        // If AI returned a single object, wrap it in an array
-        vec![value.clone()]
-    };
+    // Get the results array
+    let results_arr = value.as_array()
+        .ok_or_else(|| {
+            eprintln!("[validate_batch] AI response is not an array: {:?}", value);
+            "AI响应不是JSON数组".to_string()
+        })?;
+
+    eprintln!("[validate_batch] Got {} results from AI, expected {} chapters", results_arr.len(), chapters.len());
 
     let mut results = Vec::new();
 
-    // First try to match by chapter_id if present
-    for chapter in chapters {
-        let mut found = false;
-        for item in &results_arr {
-            let item_id = item.get("chapter_id").and_then(|v| v.as_str());
-            if item_id == Some(&chapter.id) {
-                let is_valid = item.get("is_valid").and_then(|v| v.as_bool()).unwrap_or(true);
-                let reason = item.get("reason").and_then(|v| v.as_str()).map(|s| s.to_string());
-                results.push((chapter.id.clone(), is_valid, reason));
-                found = true;
-                break;
-            }
-        }
-        // If not found by ID, default to valid
-        if !found {
+    // Match by index - AI returns results in the same order as input
+    for (i, chapter) in chapters.iter().enumerate() {
+        if let Some(item) = results_arr.get(i) {
+            let is_valid = item.get("is_valid").and_then(|v| v.as_bool()).unwrap_or(true);
+            let reason = item.get("reason").and_then(|v| v.as_str()).map(|s| s.to_string());
+            eprintln!("[validate_batch] Chapter {}: is_valid={}, reason={:?}", chapter.index, is_valid, reason);
+            results.push((chapter.id.clone(), is_valid, reason));
+        } else {
+            // If AI returned fewer results, default remaining to valid
+            eprintln!("[validate_batch] Chapter {}: no result from AI, defaulting to valid", chapter.index);
             results.push((chapter.id.clone(), true, None));
         }
     }
@@ -102,6 +98,7 @@ pub(crate) fn update_chapter_validation(
     is_valid: bool,
     reason: Option<&str>,
 ) -> Result<(), String> {
+    eprintln!("[update_chapter_validation] chapter_id={}, is_valid={}", chapter_id, is_valid);
     crate::repositories::chapters::update_chapter_validation(
         conn,
         chapter_id,
