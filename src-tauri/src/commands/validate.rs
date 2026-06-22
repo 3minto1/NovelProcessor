@@ -28,6 +28,7 @@ pub(crate) async fn start_validation(
     let db_path = state.db_path.clone();
     let validation_task = state.validation_task.clone();
     let job_id = job.id.clone();
+    eprintln!("[Validation] Starting validation for {} chapters, job_id: {}", chapters.len(), job_id);
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
@@ -35,6 +36,8 @@ pub(crate) async fn start_validation(
         let mut processed = 0;
 
         for batch in chapters.chunks(batch_size) {
+            eprintln!("[Validation] Processing batch of {} chapters, total: {}/{}", batch.len(), processed, chapters.len());
+            
             if validation_task.is_cancelled() {
                 let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
                 crate::services::progress::complete_job(
@@ -43,6 +46,7 @@ pub(crate) async fn start_validation(
                     &format!("验证已终止，已完成 {} / {} 章", processed, chapters.len()),
                 )?;
                 validation_task.finish();
+                eprintln!("[Validation] Cancelled");
                 return Ok::<(), String>(());
             }
 
@@ -59,6 +63,7 @@ pub(crate) async fn start_validation(
                 )?;
             }
 
+            eprintln!("[Validation] Calling AI for batch validation...");
             match crate::services::validate::validate_batch(
                 &client,
                 &profile,
@@ -66,6 +71,7 @@ pub(crate) async fn start_validation(
                 batch,
             ).await {
                 Ok(results) => {
+                    eprintln!("[Validation] Got {} results from AI", results.len());
                     let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
                     for (chapter_id, is_valid, reason) in &results {
                         crate::services::validate::update_chapter_validation(
@@ -75,9 +81,10 @@ pub(crate) async fn start_validation(
                             reason.as_deref(),
                         )?;
                     }
+                    eprintln!("[Validation] Updated database for {} chapters", results.len());
                 }
                 Err(e) => {
-                    eprintln!("Validation batch failed: {}", e);
+                    eprintln!("[Validation] ERROR: {}", e);
                 }
             }
 
@@ -101,6 +108,7 @@ pub(crate) async fn start_validation(
             &job_id,
             &format!("验证完成，共 {} 章", chapters.len()),
         )?;
+        eprintln!("[Validation] Job completed successfully");
 
         validation_task.finish();
         Ok::<(), String>(())
