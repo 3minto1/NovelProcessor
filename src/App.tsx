@@ -425,6 +425,16 @@ export default function App() {
     }
   }
 
+  async function cancelValidation() {
+    setNotice("");
+    try {
+      await invoke("cancel_validation");
+      showNotice("验证已终止");
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
   async function runReview() {
     if (!detail || !selectedProfileId) {
       showNotice("请先导入小说并选择模型配置。");
@@ -619,6 +629,11 @@ export default function App() {
               </p>
             </div>
             <div className="topbar-actions">
+              {detail && busy === "validate" && (
+                <button onClick={cancelValidation} className="task-control-danger">
+                  <Square size={16} />终止验证
+                </button>
+              )}
               {detail && !processingTaskActive && (
                 <>
                   <button onClick={runValidation} disabled={!selectedProfileId || !!busy}>
@@ -634,11 +649,6 @@ export default function App() {
                     导出
                   </button>
                 </>
-              )}
-              {processingTaskActive && (
-                <button onClick={() => {}}>
-                  <Square size={16} />停止
-                </button>
               )}
             </div>
           </div>

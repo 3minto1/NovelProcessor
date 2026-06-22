@@ -49,6 +49,8 @@ type CommandMap = {
   save_app_settings: { args: { settings: AppSettings }; result: AppSettings };
   save_selected_profile_id: { args: { profileId: string | null }; result: AppSettings };
   start_validation: { args: { novelId: string; profileId: string }; result: Job };
+  cancel_validation: { args?: undefined; result: void };
+  is_validation_active: { args?: undefined; result: boolean };
   start_review: { args: { novelId: string; profileId: string }; result: Job };
   export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
   get_job: { args: { jobId: string }; result: Job };

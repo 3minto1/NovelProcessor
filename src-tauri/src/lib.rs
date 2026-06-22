@@ -17,6 +17,7 @@ use tauri::Manager;
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub db_path: String,
+    pub validation_task: task_control::TaskControl,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +39,7 @@ pub fn run() {
             let state = AppState {
                 db: Mutex::new(conn),
                 db_path: db_path_str,
+                validation_task: task_control::TaskControl::new(),
             };
             app.manage(state);
             
@@ -52,6 +54,8 @@ pub fn run() {
             commands::novels::delete_chapter,
             commands::novels::toggle_chapter_validity,
             commands::validate::start_validation,
+            commands::validate::cancel_validation,
+            commands::validate::is_validation_active,
             commands::review::start_review,
             commands::export::export_novel,
             commands::models::list_model_profiles,
