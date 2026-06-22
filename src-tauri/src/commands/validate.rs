@@ -31,9 +31,10 @@ pub(crate) async fn start_validation(
 
     tokio::spawn(async move {
         let client = reqwest::Client::new();
+        let batch_size = 10;
         let mut processed = 0;
 
-        for chapter in &chapters {
+        for batch in chapters.chunks(batch_size) {
             if validation_task.is_cancelled() {
                 let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
                 crate::services::progress::complete_job(
@@ -47,35 +48,39 @@ pub(crate) async fn start_validation(
 
             {
                 let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+                let first = batch.first().map(|c| c.title.as_str()).unwrap_or("");
+                let last = batch.last().map(|c| c.title.as_str()).unwrap_or("");
                 crate::services::progress::update_job_progress(
                     &conn,
                     &job_id,
                     processed,
-                    &format!("正在验证: {}", chapter.title),
+                    &format!("正在验证: {} ~ {}", first, last),
                 )?;
             }
 
-            match crate::services::validate::validate_chapter(
+            match crate::services::validate::validate_batch(
                 &client,
                 &profile,
                 &api_key,
-                chapter,
+                batch,
             ).await {
-                Ok((is_valid, reason)) => {
+                Ok(results) => {
                     let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-                    crate::services::validate::update_chapter_validation(
-                        &conn,
-                        &chapter.id,
-                        is_valid,
-                        reason.as_deref(),
-                    )?;
+                    for (chapter_id, is_valid, reason) in &results {
+                        crate::services::validate::update_chapter_validation(
+                            &conn,
+                            chapter_id,
+                            *is_valid,
+                            reason.as_deref(),
+                        )?;
+                    }
                 }
                 Err(e) => {
-                    eprintln!("Validation failed for chapter {}: {}", chapter.index, e);
+                    eprintln!("Validation batch failed: {}", e);
                 }
             }
 
-            processed += 1;
+            processed += batch.len() as i64;
         }
 
         let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;

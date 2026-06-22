@@ -1,35 +1,37 @@
 use crate::domain::Chapter;
 
-pub(crate) fn build_chapter_validation_prompt(chapter: &Chapter) -> String {
+pub(crate) fn build_batch_validation_prompt(chapters: &[Chapter]) -> String {
+    let chapters_text = chapters
+        .iter()
+        .map(|chapter| {
+            format!(
+                "=== 章节 {} (ID:{}) : {} ===\n{}",
+                chapter.index,
+                chapter.id,
+                chapter.title,
+                truncate_text(&chapter.original_text, 8000)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
     format!(
-        r#"你是一位专业的小说内容分析师。请分析以下章节文本，判断它是否是一个有效的小说章节（实际的故事内容）还是应该被删除。
+        r#"你是一位专业的小说内容分析师。请批量分析以下章节文本，判断每个章节是否为有效的小说内容。
 
-有效章节包含：
-- 实际的叙事/故事内容
-- 人物互动、情节推进或世界观构建
-- 对话、描写或叙述
+有效章节：包含实际叙事、人物互动、情节推进的故事内容
+无效章节：仅包含作者笔记、更新通知、目录、广告、空白文本、装饰分隔线、版权声明
 
-无效章节包含：
-- 仅包含作者笔记、更新通知或公告
-- 目录或索引页
-- 广告或推广内容
-- 空白或占位文本
-- 仅包含装饰性分隔线
-- 版权声明或免责声明
-- 仅包含作者问候、感谢或告别
+请输出JSON数组，每个元素对应输入中的一个章节，按顺序排列：
+[
+  {{"chapter_id": "章节ID", "is_valid": true/false, "reason": "简要说明"}},
+  ...
+]
 
-请输出JSON格式：
-{{
-  "is_valid": true或false,
-  "reason": "简要说明",
-  "category": "valid_chapter" | "author_note" | "update_notice" | "advertisement" | "toc" | "empty" | "other"
-}}
+重要：输出必须是纯JSON数组，不要添加任何其他文本或Markdown标记。
 
-章节标题：{}
-章节正文：
+待分析章节：
 {}"#,
-        chapter.title,
-        truncate_text(&chapter.original_text, 8000)
+        chapters_text
     )
 }
 
@@ -85,12 +87,4 @@ pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
     } else {
         result
     }
-}
-
-pub(crate) fn chapter_validation_start_marker(chapter: &Chapter) -> String {
-    format!("<<<VALIDATION_START index={} id={}>>>", chapter.index, chapter.id)
-}
-
-pub(crate) fn chapter_validation_end_marker(chapter: &Chapter) -> String {
-    format!("<<<VALIDATION_END index={} id={}>>>", chapter.index, chapter.id)
 }
