@@ -135,7 +135,7 @@ const ChapterButton = memo(function ChapterButton({ chapter, selectedChapterId, 
             className="icon-button"
             onClick={(e) => {
               e.stopPropagation();
-              if (confirm(`确定删除章节 "${chapter.title}"？`)) {
+              if (confirm(`删除章节 "${chapter.title}"？\n\n注意：只删除此章节标题的识别记录，实际小说内容不会被删除。`)) {
                 onDeleteChapter(chapter.id);
               }
             }}
