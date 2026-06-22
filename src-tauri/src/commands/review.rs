@@ -23,11 +23,13 @@ pub(crate) async fn start_review(
         (profile, api_key, valid_chapters)
     };
     
+    // Get db path from state
+    let db_path = state.db_path.clone();
+    
     // Process chapters in batches of 30
     let job_id = job.id.clone();
     let batch_size = 30;
     let total_batches = (valid_chapters.len() + batch_size - 1) / batch_size;
-    let db_path = "novel_processor.db".to_string();
     
     tokio::spawn(async move {
         let client = reqwest::Client::new();

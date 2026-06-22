@@ -22,9 +22,11 @@ pub(crate) async fn start_validation(
         (profile, api_key, chapters)
     };
     
+    // Get db path from state
+    let db_path = state.db_path.clone();
+    
     // Process chapters in background
     let job_id = job.id.clone();
-    let db_path = "novel_processor.db".to_string();
     
     tokio::spawn(async move {
         let client = reqwest::Client::new();

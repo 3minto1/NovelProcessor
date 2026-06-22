@@ -16,6 +16,7 @@ use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
+    pub db_path: String,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,11 +31,13 @@ pub fn run() {
             std::fs::create_dir_all(&app_dir).expect("Failed to create app data dir");
             
             let db_path = app_dir.join("novel_processor.db");
+            let db_path_str = db_path.to_string_lossy().to_string();
             let conn = Connection::open(&db_path).expect("Failed to open database");
             db::schema::init_db(&conn).expect("Failed to initialize database");
             
             let state = AppState {
                 db: Mutex::new(conn),
+                db_path: db_path_str,
             };
             app.manage(state);
             
