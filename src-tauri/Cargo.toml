@@ -1,6 +1,6 @@
 [package]
 name = "novel-processor"
-version = "0.1.0"
+version = "0.2.0"
 description = "A desktop tool for novel chapter validation and proofreading"
 authors = ["NovelProcessor"]
 edition = "2021"
