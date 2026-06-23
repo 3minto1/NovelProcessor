@@ -525,6 +525,31 @@ export default function App() {
     }
   }
 
+  async function reviewSingleChapter(chapterId: string) {
+    if (!detail || !selectedProfileId) {
+      showNotice("请先选择模型配置。");
+      return;
+    }
+    setBusy("review-single");
+    setNotice("");
+    try {
+      await invoke("review_single_chapter", {
+        chapterId,
+        profileId: selectedProfileId,
+      });
+      const next = await invoke("get_novel_detail", { novelId: detail.novel.id });
+      if (next) {
+        setDetail(next);
+        setSelectedChapterId(chapterId);
+      }
+      showNotice("章节审查完成");
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function exportNovel() {
     if (!detail) return;
     setBusy("export");
@@ -583,15 +608,17 @@ export default function App() {
   async function handleBatchDeleteChapters(chapterIds: string[]) {
     if (!detail || chapterIds.length === 0) return;
     const novelId = detail.novel.id;
-    setBusy("delete-chapter");
     try {
       await invoke("delete_chapters_batch", { chapterIds });
-      await loadNovel(novelId);
+      const next = await invoke("get_novel_detail", { novelId });
+      if (next) {
+        setDetail(next);
+        setSelectedChapterId(next.chapters[0]?.id ?? "");
+        setSelectedBatchId(next.batches[0]?.id ?? "");
+      }
       showNotice(`已删除 ${chapterIds.length} 个章节`);
     } catch (error) {
       showNotice(String(error));
-    } finally {
-      setBusy("");
     }
   }
 
@@ -632,12 +659,15 @@ export default function App() {
   async function handleSaveCorrected(chapterId: string, correctedText: string) {
     if (!detail) return;
     try {
-      await invoke("update_chapter_text", {
+      await invoke("update_chapter_corrected_text", {
         chapterId,
-        title: detail.chapters.find(c => c.id === chapterId)?.title ?? "",
-        originalText: correctedText,
+        correctedText,
       });
-      await loadNovel(detail.novel.id);
+      const next = await invoke("get_novel_detail", { novelId: detail.novel.id });
+      if (next) {
+        setDetail(next);
+        setSelectedChapterId(chapterId);
+      }
       showNotice("审查结果已保存");
     } catch (error) {
       showNotice(String(error));
@@ -647,14 +677,12 @@ export default function App() {
   async function handleRestoreCorrected(chapterId: string) {
     if (!detail) return;
     try {
-      const chapter = detail.chapters.find(c => c.id === chapterId);
-      if (!chapter) return;
-      await invoke("update_chapter_text", {
-        chapterId,
-        title: chapter.title,
-        originalText: chapter.original_text,
-      });
-      await loadNovel(detail.novel.id);
+      await invoke("clear_chapter_review", { chapterId });
+      const next = await invoke("get_novel_detail", { novelId: detail.novel.id });
+      if (next) {
+        setDetail(next);
+        setSelectedChapterId(chapterId);
+      }
       showNotice("已恢复到原文");
     } catch (error) {
       showNotice(String(error));
@@ -946,7 +974,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <span>默认 30 章。任务运行中不能修改。</span>
+              <span>默认 30 章。验证按此数量分批发送标题；审查按此数量分组后按并发数均分发送。任务运行中不能修改。</span>
             </div>
           </section>
           <section className="settings-section">
@@ -955,7 +983,7 @@ export default function App() {
               <div className="mode-toggle mode-toggle-six setting-parallelism" role="radiogroup" aria-label="审查并发请求数">
                 {([1, 3, 6, 10, 25, 50] as const).map((value) => {
                   const batchSize = settings.chapter_batch_size ?? 30;
-                  const maxParallelism = batchSize === 100 ? 50 : batchSize === 50 ? 25 : 10;
+                  const maxParallelism = batchSize;
                   const unavailable = value > maxParallelism;
                   return (
                     <button
@@ -965,7 +993,7 @@ export default function App() {
                       aria-checked={(settings.review_parallelism ?? 10) === value}
                       role="radio"
                       disabled={!!busy || unavailable}
-                      title={unavailable ? `每批 ${batchSize} 章时最高可选并发 ${maxParallelism}` : undefined}
+                      title={unavailable ? `每组 ${batchSize} 章，最高可选并发 ${maxParallelism}` : undefined}
                       onClick={() => {
                         setSettings({ ...settings, review_parallelism: value as 1 | 3 | 6 | 10 | 25 | 50 });
                         void invoke("save_app_settings", { settings: { ...settings, review_parallelism: value } });
@@ -976,7 +1004,7 @@ export default function App() {
                   );
                 })}
               </div>
-              <span>默认 10。并发越高审查越快，但 API 限流风险越大。</span>
+              <span>默认 10。审查时将每组章节按并发数均分，每份为一个请求。并发越高审查越快，但 API 限流风险越大。</span>
             </div>
           </section>
         </div>
@@ -1005,6 +1033,7 @@ export default function App() {
             onExport={exportNovel}
             onSaveCorrected={handleSaveCorrected}
             onRestoreCorrected={handleRestoreCorrected}
+            onReviewSingle={reviewSingleChapter}
           />
         </div>
       )}

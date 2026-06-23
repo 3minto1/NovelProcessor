@@ -25,6 +25,14 @@ type CommandMap = {
     args: { chapterId: string; isValid: boolean };
     result: void;
   };
+  update_chapter_corrected_text: {
+    args: { chapterId: string; correctedText: string };
+    result: void;
+  };
+  clear_chapter_review: {
+    args: { chapterId: string };
+    result: void;
+  };
   list_model_profiles: { args?: undefined; result: ModelProfile[] };
   save_model_profile: {
     args: {
@@ -57,6 +65,7 @@ type CommandMap = {
   cancel_review: { args?: undefined; result: void };
   pause_review: { args?: undefined; result: void };
   resume_review: { args?: undefined; result: void };
+  review_single_chapter: { args: { chapterId: string; profileId: string }; result: string };
   export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
   export_chapter_directory: { args: { novelId: string; outputPath: string }; result: void };
   get_job: { args: { jobId: string }; result: Job };

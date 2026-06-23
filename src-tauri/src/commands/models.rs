@@ -12,7 +12,12 @@ pub(crate) async fn list_model_profiles(
         .prepare(
             "SELECT id, name, provider, base_url, model, temperature, top_p, thinking_mode,
                     CASE WHEN api_key IS NOT NULL AND api_key != '' THEN 1 ELSE 0 END as has_api_key,
-                    'database' as api_key_storage, updated_at
+                    CASE
+                        WHEN api_key IS NULL OR api_key = '' THEN 'none'
+                        WHEN api_key = '__KEYRING__' THEN 'system'
+                        ELSE 'database_fallback'
+                    END as api_key_storage,
+                    updated_at
              FROM model_profiles ORDER BY updated_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -49,6 +54,19 @@ pub(crate) async fn save_model_profile(
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "********")
         .map(str::to_string);
+
+    let mut api_key_storage = "none".to_string();
+    let mut db_api_key: Option<String> = None;
+
+    if let Some(ref key) = api_key {
+        if crate::credentials::store_api_key(&id, key).is_ok() {
+            api_key_storage = "system".to_string();
+            db_api_key = Some("__KEYRING__".to_string());
+        } else {
+            api_key_storage = "database_fallback".to_string();
+            db_api_key = Some(key.clone());
+        }
+    }
     
     conn.execute(
         "INSERT INTO model_profiles (id, name, provider, base_url, model, temperature, top_p, thinking_mode, api_key, updated_at)
@@ -75,12 +93,21 @@ pub(crate) async fn save_model_profile(
             input.temperature,
             input.top_p,
             input.thinking_mode,
-            api_key,
+            db_api_key,
             now,
         ],
     )
     .map_err(|e| e.to_string())?;
     
+    let has_api_key = api_key.is_some() || {
+        let existing: Option<String> = conn.query_row(
+            "SELECT api_key FROM model_profiles WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        ).unwrap_or(None);
+        existing.as_deref() == Some("__KEYRING__") || existing.as_deref().map_or(false, |v| !v.is_empty())
+    };
+
     Ok(ModelProfile {
         id,
         name: input.name,
@@ -90,8 +117,8 @@ pub(crate) async fn save_model_profile(
         temperature: input.temperature,
         top_p: input.top_p,
         thinking_mode: input.thinking_mode,
-        has_api_key: api_key.is_some(),
-        api_key_storage: "database".to_string(),
+        has_api_key,
+        api_key_storage,
         updated_at: now,
     })
 }
@@ -104,6 +131,7 @@ pub(crate) async fn delete_model_profile(
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM model_profiles WHERE id = ?1", rusqlite::params![profile_id])
         .map_err(|e| e.to_string())?;
+    let _ = crate::credentials::delete_api_key(&profile_id);
     Ok(())
 }
 
@@ -117,7 +145,12 @@ pub(crate) async fn diagnose_model_profile(
         let profile = conn.query_row(
             "SELECT id, name, provider, base_url, model, temperature, top_p, thinking_mode,
                     CASE WHEN api_key IS NOT NULL AND api_key != '' THEN 1 ELSE 0 END as has_api_key,
-                    'database' as api_key_storage, updated_at
+                    CASE
+                        WHEN api_key IS NULL OR api_key = '' THEN 'none'
+                        WHEN api_key = '__KEYRING__' THEN 'system'
+                        ELSE 'database_fallback'
+                    END as api_key_storage,
+                    updated_at
              FROM model_profiles WHERE id = ?1",
             rusqlite::params![profile_id],
             |row| {
@@ -137,11 +170,23 @@ pub(crate) async fn diagnose_model_profile(
             },
         ).map_err(|e| e.to_string())?;
 
-        let api_key = conn.query_row(
-            "SELECT api_key FROM model_profiles WHERE id = ?1",
-            rusqlite::params![profile_id],
-            |row| row.get::<_, Option<String>>(0),
-        ).map_err(|e| e.to_string())?.unwrap_or_default();
+        let api_key = {
+            let db_key: String = conn.query_row(
+                "SELECT api_key FROM model_profiles WHERE id = ?1",
+                rusqlite::params![profile_id],
+                |row| row.get::<_, Option<String>>(0),
+            ).map_err(|e| e.to_string())?.unwrap_or_default();
+
+            match db_key.as_str() {
+                "__KEYRING__" => {
+                    crate::credentials::load_api_key(&profile_id)
+                        .unwrap_or(None)
+                        .unwrap_or_default()
+                }
+                key if !key.is_empty() => key.to_string(),
+                _ => String::new(),
+            }
+        };
 
         (profile, api_key)
     };
@@ -305,10 +350,11 @@ pub(crate) async fn diagnose_model_profile(
 
 fn compact_log_line(text: &str, max_chars: usize) -> String {
     let trimmed = text.trim();
-    if trimmed.len() <= max_chars {
-        trimmed.to_string()
+    let truncated: String = trimmed.chars().take(max_chars).collect();
+    if truncated.len() < trimmed.len() {
+        format!("{}…", truncated)
     } else {
-        format!("{}…", &trimmed[..max_chars])
+        truncated
     }
 }
 

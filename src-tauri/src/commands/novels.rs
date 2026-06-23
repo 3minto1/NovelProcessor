@@ -88,11 +88,18 @@ pub(crate) async fn delete_chapters_batch(
         rusqlite::params![chapter_ids[0]],
         |row| row.get(0),
     ).map_err(|e| e.to_string())?;
+    let mut errors = Vec::new();
     for id in &chapter_ids {
-        let _ = crate::repositories::chapters::delete_chapter(&conn, id);
+        if let Err(e) = crate::repositories::chapters::delete_chapter(&conn, id) {
+            errors.push(format!("章节 {}: {}", id, e));
+        }
     }
     crate::repositories::chapters::reindex_chapters(&conn, &novel_id)?;
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("部分章节删除失败：{}", errors.join("; ")))
+    }
 }
 
 #[tauri::command]
@@ -130,5 +137,34 @@ pub(crate) async fn export_chapter_directory(
     std::fs::write(&output_path, &content)
         .map_err(|error| format!("无法写入文件：{}", error))?;
     
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn update_chapter_corrected_text(
+    state: State<'_, AppState>,
+    chapter_id: String,
+    corrected_text: String,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    crate::repositories::chapters::update_chapter_review(
+        &conn,
+        &chapter_id,
+        &corrected_text,
+        "completed",
+    )
+}
+
+#[tauri::command]
+pub(crate) async fn clear_chapter_review(
+    state: State<'_, AppState>,
+    chapter_id: String,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE chapters SET corrected_text = NULL, review_status = 'pending' WHERE id = ?1",
+        rusqlite::params![chapter_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }

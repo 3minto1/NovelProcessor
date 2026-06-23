@@ -19,6 +19,7 @@ type CompareViewProps = {
   onExport: () => void;
   onSaveCorrected?: (chapterId: string, correctedText: string) => Promise<void>;
   onRestoreCorrected?: (chapterId: string) => Promise<void>;
+  onReviewSingle?: (chapterId: string) => Promise<void>;
 };
 
 type DiffState = DiffResult & {
@@ -271,6 +272,7 @@ export const CompareView = memo(function CompareView(props: CompareViewProps) {
     onSelectChapter, onBack, onExport,
     onSaveCorrected = async () => undefined,
     onRestoreCorrected = async () => undefined,
+    onReviewSingle = async () => undefined,
   } = props;
   const selectedChapter = useMemo(() => chapters.find((c) => c.id === selectedChapterId), [chapters, selectedChapterId]);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -534,23 +536,14 @@ export const CompareView = memo(function CompareView(props: CompareViewProps) {
             activeMatchId={activeMatch?.id}
             headerActions={(
               <div className="compare-pane-actions">
-                {hasCorrected && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!window.confirm("恢复到最近一次 AI 审查结果？当前人工修改将被覆盖。")) return;
-                      setEditBusy(true);
-                      void onRestoreCorrected(selectedChapter!.id).finally(() => {
-                        setEditBusy(false);
-                        setEditing(false);
-                      });
-                    }}
-                    disabled={editBusy}
-                    title="恢复最近 AI 审查结果"
-                  >
-                    <RotateCcw size={15} />恢复 AI 审查稿
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => void onReviewSingle(selectedChapter!.id)}
+                  disabled={editBusy || busy !== ""}
+                  title="使用 AI 重新审查当前章节"
+                >
+                  <GitCompareArrows size={15} />单独审查
+                </button>
                 {!editing ? (
                   <button
                     type="button"

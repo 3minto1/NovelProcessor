@@ -47,10 +47,16 @@ pub(crate) fn build_batch_review_prompt(chapters: &[Chapter]) -> String {
     format!(
         r#"你是一位专业的小说编辑和校对员。请审查以下章节，修正错别字、删除无关内容（作者笔记、广告等）、修复语法问题。
 
-输出修正后的章节，格式：
+重要规则：
+1. 必须按章节序号顺序输出所有章节，不能遗漏
+2. 即使章节不需要修改，也必须原样输出
+3. 严格使用以下标记格式，标记之间不要添加额外文字：
+
 <<<CHAPTER_START index=N>>>
 修正后的章节正文
 <<<CHAPTER_END index=N>>>
+
+其中 N 是章节序号（如 1、2、3...），必须与输入的章节序号一致。
 
 待审查章节：
 {}"#,
@@ -59,9 +65,8 @@ pub(crate) fn build_batch_review_prompt(chapters: &[Chapter]) -> String {
 }
 
 pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
-    let chars: Vec<char> = text.chars().take(max_chars).collect();
-    let result: String = chars.into_iter().collect();
-    if result.len() < text.len() {
+    let result: String = text.chars().take(max_chars).collect();
+    if result.chars().count() < text.chars().count() {
         format!("{}...", result)
     } else {
         result
