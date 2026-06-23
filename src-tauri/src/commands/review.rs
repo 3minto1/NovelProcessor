@@ -73,7 +73,7 @@ pub(crate) async fn start_review(
 
         let total_slices = slices.len();
         let total_chapters = valid_chapters.len();
-        let mut processed_slices = 0usize;
+        let mut processed_chapters = 0i64;
         let mut error_message: Option<String> = None;
 
         for (chunk_idx, chunk) in slices.chunks(parallelism).enumerate() {
@@ -83,7 +83,7 @@ pub(crate) async fn start_review(
                 let _ = crate::services::progress::complete_job(
                     &conn,
                     &job_id,
-                    &format!("审查已终止，已完成 {} / {} 章", processed_slices * 2, total_chapters),
+                    &format!("审查已终止，已完成 {} / {} 章", processed_chapters, total_chapters),
                 );
                 task_control.finish();
                 eprintln!("[Review] Cancelled");
@@ -94,15 +94,15 @@ pub(crate) async fn start_review(
                 let _ = crate::services::progress::update_job_progress(
                     &conn,
                     &job_id,
-                    (processed_slices * 2).min(total_chapters) as i64,
-                    &format!("已暂停 · 已审查 {} / {} 章 · 第 {}~{} 片段", processed_slices * 2, total_chapters, global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices)),
+                    processed_chapters,
+                    &format!("已暂停 · 已审查 {} / {} 章 · 第 {}~{} 片段", processed_chapters, total_chapters, global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices)),
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 if task_control.is_cancelled() {
                     let _ = crate::services::progress::complete_job(
                         &conn,
                         &job_id,
-                        &format!("审查已终止，已完成 {} / {} 章", processed_slices * 2, total_chapters),
+                        &format!("审查已终止，已完成 {} / {} 章", processed_chapters, total_chapters),
                     );
                     task_control.finish();
                     eprintln!("[Review] Cancelled during pause");
@@ -122,8 +122,8 @@ pub(crate) async fn start_review(
                 let _ = crate::services::progress::update_job_progress(
                     &conn,
                     &job_id,
-                    (processed_slices * 2).min(total_chapters) as i64,
-                    &format!("正在审查第 {}~{} 片段 (共 {} 片段) · {}/{}", global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices), total_slices, processed_slices * 2, total_chapters),
+                    processed_chapters,
+                    &format!("正在审查第 {}~{} 片段 (共 {} 片段) · {}/{}", global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices), total_slices, processed_chapters, total_chapters),
                 );
 
                 handles.push(tokio::spawn(async move {
@@ -198,13 +198,12 @@ pub(crate) async fn start_review(
                 }
             }
 
-            processed_slices += chunk.len();
-            let chapters_done = (processed_slices * 2).min(total_chapters);
+            processed_chapters += chunk.iter().map(|s| s.len() as i64).sum::<i64>();
             let _ = crate::services::progress::update_job_progress(
                 &conn,
                 &job_id,
-                chapters_done as i64,
-                &format!("已审查 {} / {} 章 · 第 {}~{} 片段", chapters_done, total_chapters, global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices)),
+                processed_chapters,
+                &format!("已审查 {} / {} 章 · 第 {}~{} 片段", processed_chapters, total_chapters, global_slice_start + 1, (global_slice_start + chunk.len()).min(total_slices)),
             );
         }
 
