@@ -48,7 +48,7 @@ const savedApiKeyMask = "********";
 export default function App() {
   const {
     novels, setNovels, detail, setDetail, selectedChapterId, setSelectedChapterId,
-    selectedBatchId, setSelectedBatchId, selectedBatch
+    selectedBatchId, setSelectedBatchId
   } = useNovels();
   const {
     profiles, setProfiles, profileDraft, setProfileDraft,
@@ -693,6 +693,33 @@ export default function App() {
   const validChapters = detail?.chapters.filter((c) => c.is_valid) ?? [];
   const invalidChapters = detail?.chapters.filter((c) => !c.is_valid) ?? [];
 
+  const dynamicBatches = useMemo(() => {
+    if (!detail) return [];
+    const batchSize = settings.chapter_batch_size ?? 30;
+    const chapters = detail.chapters;
+    const batches: Array<{ id: string; novel_id: string; batch_index: number; label: string; start_chapter: number; end_chapter: number; status: string; created_at: string }> = [];
+    for (let i = 0; i < chapters.length; i += batchSize) {
+      const end = Math.min(i + batchSize, chapters.length);
+      batches.push({
+        id: `batch-${i}`,
+        novel_id: detail.novel.id,
+        batch_index: batches.length,
+        label: `第${chapters[i].index}-${chapters[end - 1].index}章`,
+        start_chapter: chapters[i].index,
+        end_chapter: chapters[end - 1].index,
+        status: "pending",
+        created_at: "",
+      });
+    }
+    return batches;
+  }, [detail, settings.chapter_batch_size]);
+
+  useEffect(() => {
+    if (dynamicBatches.length > 0 && !dynamicBatches.some((b) => b.id === selectedBatchId)) {
+      setSelectedBatchId(dynamicBatches[0].id);
+    }
+  }, [dynamicBatches, selectedBatchId]);
+
   return (
     <div className="app-shell">
       <header className="app-menu">
@@ -865,8 +892,8 @@ export default function App() {
           )}
 
           <BatchPanel
-            batches={detail.batches}
-            selectedBatch={selectedBatch}
+            batches={dynamicBatches}
+            selectedBatch={dynamicBatches.find((b) => b.id === selectedBatchId)}
             selectedBatchId={selectedBatchId}
             onSelect={setSelectedBatchId}
           />
