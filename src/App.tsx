@@ -703,7 +703,7 @@ export default function App() {
       batches.push({
         id: `batch-${i}`,
         novel_id: detail.novel.id,
-        batch_index: batches.length,
+        batch_index: batches.length + 1,
         label: `第${chapters[i].index}-${chapters[end - 1].index}章`,
         start_chapter: chapters[i].index,
         end_chapter: chapters[end - 1].index,
