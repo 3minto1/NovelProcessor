@@ -1,6 +1,7 @@
 import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
+  ArrowLeft,
   BookOpen,
   CheckCircle2,
   ClipboardList,
@@ -951,6 +952,7 @@ export default function App() {
         <div className="page-panel">
           <div className="page-heading">
             <h2>设置</h2>
+            <button onClick={() => setActiveView("workspace")}><ArrowLeft size={16} />返回</button>
           </div>
           <section className="settings-section">
             <h3>每批次章节数</h3>
