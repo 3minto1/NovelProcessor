@@ -10,6 +10,7 @@ import {
   GitCompareArrows,
   Loader2,
   MoreHorizontal,
+  RefreshCw,
   Square,
   Trash2,
   X
@@ -32,6 +33,7 @@ import { useNovels } from "./hooks/useNovels";
 import { useNotice } from "./hooks/useNotice";
 import { useTaskState } from "./hooks/useTaskState";
 import { invokeCommand as invoke } from "./tauriApi";
+import type { UpdateInfo } from "./tauriApi";
 import type {
   AppSettings,
   Chapter,
@@ -69,6 +71,9 @@ export default function App() {
   const [dragActive, setDragActive] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [taskPaused, setTaskPaused] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
   const detailRef = useRef<NovelDetail | null>(null);
   const originalRef = useRef<HTMLDivElement>(null);
   const correctedRef = useRef<HTMLDivElement>(null);
@@ -82,6 +87,10 @@ export default function App() {
 
   useEffect(() => {
     void refreshAll();
+  }, []);
+
+  useEffect(() => {
+    void checkForUpdate();
   }, []);
 
   useEffect(() => {
@@ -551,6 +560,40 @@ export default function App() {
     }
   }
 
+  async function checkForUpdate() {
+    setUpdateChecking(true);
+    try {
+      const info = await invoke("check_update");
+      setUpdateInfo(info);
+    } catch {
+      // Ignore update check errors
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  async function downloadLatestUpdate() {
+    if (!updateInfo || !updateInfo.download_url) return;
+    setUpdateDownloading(true);
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected !== "string") {
+        setUpdateDownloading(false);
+        return;
+      }
+      const path = await invoke("download_update", {
+        downloadUrl: updateInfo.download_url,
+        outputDir: selected,
+      });
+      showNotice(`下载完成：${path}`);
+      setUpdateInfo(null);
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setUpdateDownloading(false);
+    }
+  }
+
   async function exportNovel() {
     if (!detail) return;
     setBusy("export");
@@ -733,6 +776,24 @@ export default function App() {
           </button>
         </div>
         <div className="app-menu-spacer" />
+        <button
+          className="app-menu-item update-menu-item"
+          onClick={() => {
+            if (updateInfo?.has_update) {
+              if (window.confirm(`发现新版本 ${updateInfo.latest_version}，是否下载？`)) {
+                void downloadLatestUpdate();
+              }
+            } else {
+              void checkForUpdate();
+              showNotice("正在检查更新...");
+            }
+          }}
+          disabled={updateChecking || updateDownloading}
+        >
+          {updateChecking || updateDownloading ? <Loader2 className="spin" size={14} /> : <RefreshCw size={14} />}
+          {updateInfo?.has_update ? `更新 (v${updateInfo.latest_version})` : "检查更新"}
+          {updateInfo?.has_update && <span className="update-dot" />}
+        </button>
         <button
           className={`app-menu-item ${activeView === "workspace" ? "active" : ""}`}
           onClick={() => setActiveView("workspace")}

@@ -83,6 +83,8 @@ pub fn run() {
             commands::settings::get_app_settings,
             commands::settings::save_app_settings,
             commands::settings::save_selected_profile_id,
+            commands::update::check_update,
+            commands::update::download_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

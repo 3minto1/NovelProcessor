@@ -10,6 +10,14 @@ import type {
   NovelDetail,
 } from "./types";
 
+export type UpdateInfo = {
+  has_update: boolean;
+  latest_version: string;
+  current_version: string;
+  download_url: string;
+  release_notes: string;
+};
+
 type CommandMap = {
   list_novels: { args?: undefined; result: Novel[] };
   get_novel_detail: { args: { novelId: string }; result: NovelDetail };
@@ -69,6 +77,8 @@ type CommandMap = {
   export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
   export_chapter_directory: { args: { novelId: string; outputPath: string }; result: void };
   get_job: { args: { jobId: string }; result: Job };
+  check_update: { args?: undefined; result: UpdateInfo };
+  download_update: { args: { downloadUrl: string; outputDir: string }; result: string };
   record_frontend_error: {
     args: { message: string; stack: string | null; componentStack: string | null };
     result: void;
