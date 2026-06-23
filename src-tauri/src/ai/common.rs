@@ -27,7 +27,7 @@ pub(crate) fn apply_openai_compatible_output_limit(
     output_limit_override: Option<usize>,
 ) -> bool {
     let output_limit = output_limit_override.unwrap_or_else(|| {
-        if prefer_json_output { 16_384 } else { 65_536 }
+        if prefer_json_output { 65_536 } else { 65_536 }
     });
 
     if is_deepseek_profile(profile, base_url, model) {

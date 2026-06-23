@@ -17,10 +17,12 @@ pub(crate) fn build_batch_validation_prompt(chapters: &[Chapter]) -> String {
 - 作者笔记、更新通知、广告标题 → 无效
 - 标题过长（超过30字）很可能是正文 → 无效
 
-请输出JSON数组，每个元素对应一个章节：
+请严格按顺序输出JSON数组，每个元素对应一个章节（序号从1开始）：
 [
-  {{"chapter_id": "章节ID", "is_valid": true或false, "reason": "简要原因"}}
+  {{"is_valid": true或false, "reason": "简要原因"}}
 ]
+
+注意：reason尽量简短（10字以内），不要输出多余文字。
 
 章节列表：
 {}"#,

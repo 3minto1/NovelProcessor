@@ -1,8 +1,28 @@
-use crate::domain::{Chapter, ModelProfile, Job};
+use crate::domain::{Chapter, ModelOutput, ModelProfile, Job};
 use crate::ai::prompts::build_batch_validation_prompt;
 use rusqlite::Connection;
 use uuid::Uuid;
 use reqwest::Client;
+
+pub(crate) fn log_ai_call(
+    conn: &Connection,
+    novel_id: &str,
+    profile_id: &str,
+    action: &str,
+    chapter_title: Option<&str>,
+    status: &str,
+    content: &str,
+    reasoning: Option<&str>,
+    raw_response: &str,
+) {
+    let id = Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = conn.execute(
+        "INSERT INTO ai_logs (id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![id, novel_id, profile_id, action, chapter_title, status, content, reasoning, raw_response, now],
+    );
+}
 
 pub(crate) fn start_validation(
     conn: &Connection,
@@ -45,9 +65,9 @@ pub(crate) async fn validate_batch(
     profile: &ModelProfile,
     api_key: &str,
     chapters: &[Chapter],
-) -> Result<Vec<(String, bool, Option<String>)>, String> {
+) -> Result<(Vec<(String, bool, Option<String>)>, ModelOutput), String> {
     let prompt = build_batch_validation_prompt(chapters);
-    let system = "你是一位小说目录分析专家。请按JSON数组格式输出结果，每个元素对应一个章节。";
+    let system = "你是一位小说目录分析专家。按JSON数组格式输出，每个元素只有is_valid和reason两个字段。只输出JSON，不要其他文字。";
 
     let output = crate::ai::common::generate_text(
         client,
@@ -61,7 +81,8 @@ pub(crate) async fn validate_batch(
 
     eprintln!("[validate_batch] AI response: {}", &output.text[..output.text.len().min(500)]);
 
-    let value: serde_json::Value = serde_json::from_str(&output.text)
+    let json_str = extract_json_from_response(&output.text);
+    let value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("无法解析AI响应：{}", e))?;
 
     // Get the results array
@@ -89,7 +110,33 @@ pub(crate) async fn validate_batch(
         }
     }
 
-    Ok(results)
+    Ok((results, output))
+}
+
+fn extract_json_from_response(text: &str) -> String {
+    let trimmed = text.trim();
+
+    if let Some(start) = trimmed.find("```json") {
+        let rest = &trimmed[start + 7..];
+        if let Some(end) = rest.find("```") {
+            return rest[..end].trim().to_string();
+        }
+    }
+
+    if let Some(start) = trimmed.find("```") {
+        let rest = &trimmed[start + 3..];
+        if let Some(end) = rest.find("```") {
+            return rest[..end].trim().to_string();
+        }
+    }
+
+    if let Some(start) = trimmed.find('[') {
+        if let Some(end) = trimmed.rfind(']') {
+            return trimmed[start..=end].to_string();
+        }
+    }
+
+    trimmed.to_string()
 }
 
 pub(crate) fn update_chapter_validation(

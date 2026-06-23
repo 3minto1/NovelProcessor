@@ -1,4 +1,4 @@
-use crate::domain::{Chapter, ModelProfile, Job};
+use crate::domain::{Chapter, ModelOutput, ModelProfile, Job};
 use crate::ai::prompts::build_batch_review_prompt;
 use rusqlite::Connection;
 use uuid::Uuid;
@@ -46,7 +46,7 @@ pub(crate) async fn review_batch(
     profile: &ModelProfile,
     api_key: &str,
     chapters: &[Chapter],
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<(Vec<(String, String)>, ModelOutput), String> {
     let prompt = build_batch_review_prompt(chapters);
     let system = "你是一位专业的小说编辑和校对员，专注于修正错别字、删除无关内容和修复语法问题。";
     
@@ -60,7 +60,8 @@ pub(crate) async fn review_batch(
         false,
     ).await?;
     
-    parse_review_output(&output.text, chapters)
+    let results = parse_review_output(&output.text, chapters)?;
+    Ok((results, output))
 }
 
 fn parse_review_output(

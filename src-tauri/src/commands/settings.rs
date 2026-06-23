@@ -34,10 +34,21 @@ pub(crate) async fn get_app_settings(
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(30);
     
+    let review_parallelism = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'review_parallelism'",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(10);
+    
     Ok(AppSettings {
         export_dir,
         selected_profile_id,
         chapter_batch_size,
+        review_parallelism,
     })
 }
 
@@ -65,6 +76,11 @@ pub(crate) async fn save_app_settings(
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES ('chapter_batch_size', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         [settings.chapter_batch_size.to_string()],
+    ).map_err(|e| e.to_string())?;
+    
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES ('review_parallelism', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [settings.review_parallelism.to_string()],
     ).map_err(|e| e.to_string())?;
     
     get_app_settings_inner(&conn)
@@ -97,10 +113,21 @@ fn get_app_settings_inner(conn: &rusqlite::Connection) -> Result<AppSettings, St
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(30);
     
+    let review_parallelism = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'review_parallelism'",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(10);
+    
     Ok(AppSettings {
         export_dir,
         selected_profile_id,
         chapter_batch_size,
+        review_parallelism,
     })
 }
 

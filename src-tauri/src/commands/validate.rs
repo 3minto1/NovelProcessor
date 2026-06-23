@@ -28,40 +28,51 @@ pub(crate) async fn start_validation(
     let db_path = state.db_path.clone();
     let validation_task = state.validation_task.clone();
     let job_id = job.id.clone();
+    let novel_id_clone = novel_id.clone();
+    let profile_id_clone = profile_id.clone();
     eprintln!("[Validation] Starting validation for {} chapters, job_id: {}", chapters.len(), job_id);
 
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let batch_size = 1000;
+        let conn = match rusqlite::Connection::open(&db_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[Validation] FATAL: Cannot open database: {}", e);
+                validation_task.finish();
+                return;
+            }
+        };
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        let batch_size = 50;
         let mut processed = 0;
+        let mut error_message: Option<String> = None;
 
         for batch in chapters.chunks(batch_size) {
             eprintln!("[Validation] Processing batch of {} chapters, total: {}/{}", batch.len(), processed, chapters.len());
-            
+
             if validation_task.is_cancelled() {
-                let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-                crate::services::progress::complete_job(
+                let _ = crate::services::progress::complete_job(
                     &conn,
                     &job_id,
                     &format!("验证已终止，已完成 {} / {} 章", processed, chapters.len()),
-                )?;
+                );
                 validation_task.finish();
                 eprintln!("[Validation] Cancelled");
-                return Ok::<(), String>(());
+                return;
             }
 
-            // Update progress at start of batch
-            {
-                let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-                let first = batch.first().map(|c| c.title.as_str()).unwrap_or("");
-                let last = batch.last().map(|c| c.title.as_str()).unwrap_or("");
-                crate::services::progress::update_job_progress(
-                    &conn,
-                    &job_id,
-                    processed,
-                    &format!("正在验证: {} ~ {}", first, last),
-                )?;
-            }
+            let first = batch.first().map(|c| c.title.as_str()).unwrap_or("");
+            let last = batch.last().map(|c| c.title.as_str()).unwrap_or("");
+            let _ = crate::services::progress::update_job_progress(
+                &conn,
+                &job_id,
+                processed,
+                &format!("正在验证: {} ~ {}", first, last),
+            );
 
             eprintln!("[Validation] Calling AI for batch validation...");
             match crate::services::validate::validate_batch(
@@ -70,48 +81,77 @@ pub(crate) async fn start_validation(
                 &api_key,
                 batch,
             ).await {
-                Ok(results) => {
+                Ok((results, output)) => {
                     eprintln!("[Validation] Got {} results from AI", results.len());
-                    let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+                    crate::services::validate::log_ai_call(
+                        &conn,
+                        &novel_id_clone,
+                        &profile_id_clone,
+                        "validate",
+                        Some(first),
+                        "success",
+                        &output.text,
+                        output.reasoning.as_deref(),
+                        &output.raw_response,
+                    );
                     for (chapter_id, is_valid, reason) in &results {
-                        crate::services::validate::update_chapter_validation(
+                        if let Err(e) = crate::services::validate::update_chapter_validation(
                             &conn,
                             chapter_id,
                             *is_valid,
                             reason.as_deref(),
-                        )?;
+                        ) {
+                            eprintln!("[Validation] Failed to update chapter {}: {}", chapter_id, e);
+                        }
                     }
                     eprintln!("[Validation] Updated database for {} chapters", results.len());
                 }
                 Err(e) => {
                     eprintln!("[Validation] ERROR: {}", e);
+                    error_message = Some(e.clone());
+                    crate::services::validate::log_ai_call(
+                        &conn,
+                        &novel_id_clone,
+                        &profile_id_clone,
+                        "validate",
+                        Some(first),
+                        "error",
+                        &e,
+                        None,
+                        "",
+                    );
+                    for chapter in batch {
+                        if let Err(e) = crate::services::validate::update_chapter_validation(
+                            &conn,
+                            &chapter.id,
+                            true,
+                            Some("AI验证失败，默认有效"),
+                        ) {
+                            eprintln!("[Validation] Failed to mark chapter {}: {}", chapter.id, e);
+                        }
+                    }
+                    eprintln!("[Validation] Marked {} chapters as valid (AI error)", batch.len());
                 }
             }
 
             processed += batch.len() as i64;
 
-            // Update progress after batch completes
-            {
-                let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-                crate::services::progress::update_job_progress(
-                    &conn,
-                    &job_id,
-                    processed,
-                    &format!("已验证 {} / {} 章", processed, chapters.len()),
-                )?;
-            }
+            let _ = crate::services::progress::update_job_progress(
+                &conn,
+                &job_id,
+                processed,
+                &format!("已验证 {} / {} 章", processed, chapters.len()),
+            );
         }
 
-        let conn = rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
-        crate::services::progress::complete_job(
-            &conn,
-            &job_id,
-            &format!("验证完成，共 {} 章", chapters.len()),
-        )?;
+        let message = match error_message {
+            Some(e) => format!("验证完成（部分失败），共 {} 章。错误：{}", chapters.len(), e),
+            None => format!("验证完成，共 {} 章", chapters.len()),
+        };
+        let _ = crate::services::progress::complete_job(&conn, &job_id, &message);
         eprintln!("[Validation] Job completed successfully");
 
         validation_task.finish();
-        Ok::<(), String>(())
     });
 
     Ok(job)
@@ -123,6 +163,7 @@ pub(crate) async fn cancel_validation(
 ) -> Result<(), String> {
     if state.validation_task.is_active() {
         state.validation_task.cancel();
+        state.validation_task.finish();
         Ok(())
     } else {
         Err("当前没有正在运行的验证任务。".to_string())
@@ -134,6 +175,13 @@ pub(crate) async fn is_validation_active(
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     Ok(state.validation_task.is_active())
+}
+
+#[tauri::command]
+pub(crate) async fn is_task_paused(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state.validation_task.is_paused())
 }
 
 fn get_profile(conn: &rusqlite::Connection, profile_id: &str) -> Result<crate::domain::ModelProfile, String> {

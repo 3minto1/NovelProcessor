@@ -20,6 +20,7 @@ type CommandMap = {
     result: void;
   };
   delete_chapter: { args: { chapterId: string }; result: void };
+  delete_chapters_batch: { args: { chapterIds: string[] }; result: void };
   toggle_chapter_validity: {
     args: { chapterId: string; isValid: boolean };
     result: void;
@@ -51,7 +52,11 @@ type CommandMap = {
   start_validation: { args: { novelId: string; profileId: string }; result: Job };
   cancel_validation: { args?: undefined; result: void };
   is_validation_active: { args?: undefined; result: boolean };
+  is_task_paused: { args?: undefined; result: boolean };
   start_review: { args: { novelId: string; profileId: string }; result: Job };
+  cancel_review: { args?: undefined; result: void };
+  pause_review: { args?: undefined; result: void };
+  resume_review: { args?: undefined; result: void };
   export_novel: { args: { novelId: string; outputDir: string }; result: ExportResult };
   export_chapter_directory: { args: { novelId: string; outputPath: string }; result: void };
   get_job: { args: { jobId: string }; result: Job };

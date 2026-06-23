@@ -35,7 +35,13 @@ pub fn run() {
             let db_path_str = db_path.to_string_lossy().to_string();
             let conn = Connection::open(&db_path).expect("Failed to open database");
             db::schema::init_db(&conn).expect("Failed to initialize database");
-            
+
+            let _ = conn.execute(
+                "UPDATE jobs SET status = 'failed', message = message || ' [应用重启后终止]'
+                 WHERE status = 'running'",
+                [],
+            );
+
             let state = AppState {
                 db: Mutex::new(conn),
                 db_path: db_path_str,
@@ -52,12 +58,17 @@ pub fn run() {
             commands::novels::delete_novel,
             commands::novels::update_chapter_text,
             commands::novels::delete_chapter,
+            commands::novels::delete_chapters_batch,
             commands::novels::toggle_chapter_validity,
             commands::novels::export_chapter_directory,
             commands::validate::start_validation,
             commands::validate::cancel_validation,
             commands::validate::is_validation_active,
+            commands::validate::is_task_paused,
             commands::review::start_review,
+            commands::review::cancel_review,
+            commands::review::pause_review,
+            commands::review::resume_review,
             commands::export::export_novel,
             commands::models::list_model_profiles,
             commands::models::save_model_profile,

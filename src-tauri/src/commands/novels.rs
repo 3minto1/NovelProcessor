@@ -43,7 +43,19 @@ pub(crate) async fn update_chapter_text(
     original_text: String,
 ) -> Result<(), String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    crate::repositories::chapters::update_chapter_text(&conn, &chapter_id, &title, &original_text)
+    let old_title: String = conn
+        .query_row(
+            "SELECT title FROM chapters WHERE id = ?1",
+            rusqlite::params![chapter_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let synced_text = if old_title != title && !old_title.trim().is_empty() {
+        original_text.replacen(old_title.trim(), title.trim(), 1)
+    } else {
+        original_text
+    };
+    crate::repositories::chapters::update_chapter_text(&conn, &chapter_id, &title, &synced_text)
 }
 
 #[tauri::command]
@@ -58,6 +70,27 @@ pub(crate) async fn delete_chapter(
         |row| row.get(0),
     ).map_err(|e| e.to_string())?;
     crate::repositories::chapters::delete_chapter(&conn, &chapter_id)?;
+    crate::repositories::chapters::reindex_chapters(&conn, &novel_id)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn delete_chapters_batch(
+    state: State<'_, AppState>,
+    chapter_ids: Vec<String>,
+) -> Result<(), String> {
+    if chapter_ids.is_empty() {
+        return Ok(());
+    }
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let novel_id: String = conn.query_row(
+        "SELECT novel_id FROM chapters WHERE id = ?1",
+        rusqlite::params![chapter_ids[0]],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+    for id in &chapter_ids {
+        let _ = crate::repositories::chapters::delete_chapter(&conn, id);
+    }
     crate::repositories::chapters::reindex_chapters(&conn, &novel_id)?;
     Ok(())
 }

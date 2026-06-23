@@ -85,6 +85,7 @@ pub struct AiLog {
 pub struct AppSettings {
     pub export_dir: Option<String>,
     pub chapter_batch_size: i64,
+    pub review_parallelism: i64,
     pub selected_profile_id: Option<String>,
 }
 

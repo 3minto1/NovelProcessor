@@ -94,6 +94,7 @@ export type AppSettings = {
   export_dir?: string | null;
   selected_profile_id?: string | null;
   chapter_batch_size?: 30 | 50 | 100;
+  review_parallelism?: 1 | 3 | 6 | 10 | 25 | 50;
 };
 
 export type JobEstimate = {

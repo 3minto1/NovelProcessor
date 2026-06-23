@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Download,
   FilePlus2,
+  GitCompareArrows,
   Loader2,
   MoreHorizontal,
   Square,
@@ -16,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DeleteNovelDialog } from "./components/common/DeleteNovelDialog";
 import { getStatusTone, StatusBadge } from "./components/common/StatusBadge";
 import { LogsPage } from "./components/pages/LogsPage";
+import { CompareView } from "./components/Compare/CompareView";
 import { ModelProfiles } from "./components/Settings/ModelProfiles";
 import { BatchPanel } from "./components/Workspace/BatchPanel";
 import { ChapterList } from "./components/Workspace/ChapterList";
@@ -38,7 +40,7 @@ import type {
   NovelDetail
 } from "./types";
 
-type View = "workspace" | "settings" | "logs";
+type View = "workspace" | "settings" | "logs" | "compare";
 
 const savedApiKeyMask = "********";
 
@@ -65,7 +67,10 @@ export default function App() {
   const [modelDiagnosis, setModelDiagnosis] = useState<ModelDiagnosis | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
+  const [taskPaused, setTaskPaused] = useState(false);
   const detailRef = useRef<NovelDetail | null>(null);
+  const originalRef = useRef<HTMLDivElement>(null);
+  const correctedRef = useRef<HTMLDivElement>(null);
   const busyRef = useRef("");
   const importInProgressRef = useRef(false);
 
@@ -123,7 +128,7 @@ export default function App() {
     };
   }, []);
 
-  // Poll for job progress
+  // Poll for job progress and task pause state
   useEffect(() => {
     if (!job || job.status === "completed" || job.status === "failed") {
       return;
@@ -133,10 +138,14 @@ export default function App() {
       try {
         const updatedJob: Job = await invoke("get_job", { jobId: job.id });
         setJob(updatedJob);
+        const paused: boolean = await invoke("is_task_paused");
+        setTaskPaused(paused);
         
         if (updatedJob.status === "completed" || updatedJob.status === "failed") {
           clearInterval(interval);
           setBusy("");
+          setTaskPaused(false);
+          setJob(null);
           const currentDetail = detailRef.current;
           if (currentDetail) {
             await loadNovel(currentDetail.novel.id);
@@ -161,8 +170,24 @@ export default function App() {
     setSettings(appSettings);
     const savedProfileId = appSettings.selected_profile_id ?? "";
     const savedProfileIsValid = savedProfileId && profileRows.some((p) => p.id === savedProfileId);
+    const newSelectedId = savedProfileIsValid ? savedProfileId : profileRows[0]?.id ?? "";
     if (!selectedProfileId || !profileRows.some((p) => p.id === selectedProfileId)) {
-      setSelectedProfileId(savedProfileIsValid ? savedProfileId : profileRows[0]?.id ?? "");
+      setSelectedProfileId(newSelectedId);
+    }
+    const activeId = newSelectedId || selectedProfileId;
+    const activeProfile = profileRows.find((p) => p.id === activeId);
+    if (activeProfile) {
+      setProfileDraft({
+        id: activeProfile.id,
+        name: activeProfile.name,
+        provider: activeProfile.provider,
+        base_url: activeProfile.base_url,
+        model: activeProfile.model,
+        temperature: activeProfile.temperature,
+        top_p: activeProfile.top_p,
+        thinking_mode: activeProfile.thinking_mode as "auto" | "off" | "on",
+        api_key: activeProfile.has_api_key ? savedApiKeyMask : "",
+      });
     }
     if (novelRows[0]) {
       await loadNovel(novelRows[0].id);
@@ -175,10 +200,12 @@ export default function App() {
       return;
     }
     const next = await invoke("get_novel_detail", { novelId });
-    setDetail(next);
-    setSelectedChapterId(next.chapters[0]?.id ?? "");
-    setSelectedBatchId(next.batches[0]?.id ?? "");
-    await refreshLogs(novelId);
+    if (next) {
+      setDetail(next);
+      setSelectedChapterId(next.chapters[0]?.id ?? "");
+      setSelectedBatchId(next.batches[0]?.id ?? "");
+      await refreshLogs(novelId);
+    }
   }
 
   async function refreshLogs(novelId = detail?.novel.id) {
@@ -396,6 +423,20 @@ export default function App() {
     setSelectedProfileId(profileId);
     setOpenModelMenu(false);
     void persistSelectedProfileId(profileId);
+    const profile = profiles.find((p) => p.id === profileId);
+    if (profile) {
+      setProfileDraft({
+        id: profile.id,
+        name: profile.name,
+        provider: profile.provider,
+        base_url: profile.base_url,
+        model: profile.model,
+        temperature: profile.temperature,
+        top_p: profile.top_p,
+        thinking_mode: profile.thinking_mode as "auto" | "off" | "on",
+        api_key: profile.has_api_key ? savedApiKeyMask : "",
+      });
+    }
   }
 
   async function runValidation() {
@@ -422,8 +463,23 @@ export default function App() {
     setNotice("");
     try {
       await invoke("cancel_validation");
-      showNotice("验证已终止");
+      setJob(null);
+      setTaskPaused(false);
       setBusy("");
+      showNotice("验证已终止", 8000);
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
+  async function cancelReview() {
+    setNotice("");
+    try {
+      await invoke("cancel_review");
+      setJob(null);
+      setTaskPaused(false);
+      setBusy("");
+      showNotice("审查已终止", 8000);
     } catch (error) {
       showNotice(String(error));
     }
@@ -445,8 +501,27 @@ export default function App() {
       showNotice(result.message);
     } catch (error) {
       showNotice(String(error));
-    } finally {
       setBusy("");
+    }
+  }
+
+  async function pauseReview() {
+    setNotice("");
+    try {
+      await invoke("pause_review");
+      showNotice("审查已暂停，点击「继续」恢复", 8000);
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
+  async function resumeReview() {
+    setNotice("");
+    try {
+      await invoke("resume_review");
+      showNotice("审查已继续", 8000);
+    } catch (error) {
+      showNotice(String(error));
     }
   }
 
@@ -505,6 +580,21 @@ export default function App() {
     }
   }
 
+  async function handleBatchDeleteChapters(chapterIds: string[]) {
+    if (!detail || chapterIds.length === 0) return;
+    const novelId = detail.novel.id;
+    setBusy("delete-chapter");
+    try {
+      await invoke("delete_chapters_batch", { chapterIds });
+      await loadNovel(novelId);
+      showNotice(`已删除 ${chapterIds.length} 个章节`);
+    } catch (error) {
+      showNotice(String(error));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function handleToggleValidity(chapterId: string, isValid: boolean) {
     if (!detail) return;
     setBusy("toggle-validity");
@@ -539,6 +629,38 @@ export default function App() {
     }
   }
 
+  async function handleSaveCorrected(chapterId: string, correctedText: string) {
+    if (!detail) return;
+    try {
+      await invoke("update_chapter_text", {
+        chapterId,
+        title: detail.chapters.find(c => c.id === chapterId)?.title ?? "",
+        originalText: correctedText,
+      });
+      await loadNovel(detail.novel.id);
+      showNotice("审查结果已保存");
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
+  async function handleRestoreCorrected(chapterId: string) {
+    if (!detail) return;
+    try {
+      const chapter = detail.chapters.find(c => c.id === chapterId);
+      if (!chapter) return;
+      await invoke("update_chapter_text", {
+        chapterId,
+        title: chapter.title,
+        originalText: chapter.original_text,
+      });
+      await loadNovel(detail.novel.id);
+      showNotice("已恢复到原文");
+    } catch (error) {
+      showNotice(String(error));
+    }
+  }
+
   const validChapters = detail?.chapters.filter((c) => c.is_valid) ?? [];
   const invalidChapters = detail?.chapters.filter((c) => !c.is_valid) ?? [];
 
@@ -561,6 +683,14 @@ export default function App() {
         >
           工作区
         </button>
+        {detail && (
+          <button
+            className={`app-menu-item ${activeView === "compare" ? "active" : ""}`}
+            onClick={() => setActiveView("compare")}
+          >
+            <GitCompareArrows size={14} /> 对比
+          </button>
+        )}
         <button
           className={`app-menu-item ${activeView === "settings" ? "active" : ""}`}
           onClick={() => setActiveView("settings")}
@@ -643,10 +773,22 @@ export default function App() {
               </p>
             </div>
             <div className="topbar-actions">
-              {detail && busy === "validate" && (
-                <button onClick={cancelValidation} className="task-control-danger">
-                  <Square size={16} />终止验证
-                </button>
+              {detail && (busy === "validate" || busy === "review") && (
+                <>
+                  {busy === "review" && (
+                    <button onClick={pauseReview} className="task-control">
+                      <Square size={16} />暂停
+                    </button>
+                  )}
+                  {busy === "review" && (
+                    <button onClick={resumeReview} className="task-control">
+                      <CheckCircle2 size={16} />继续
+                    </button>
+                  )}
+                  <button onClick={busy === "validate" ? cancelValidation : cancelReview} className="task-control-danger">
+                    <Square size={16} />终止
+                  </button>
+                </>
               )}
               {detail && !processingTaskActive && (
                 <>
@@ -673,6 +815,11 @@ export default function App() {
             <div className={`job-strip status-${getStatusTone(job.status)}`}>
               <div className="job-content">
                 <span>{job.message}</span>
+                {(busy === "validate" || busy === "review") && (
+                  <span style={{ marginLeft: "8px", fontSize: "12px", opacity: 0.8 }}>
+                    {taskPaused ? "⏸ 已暂停" : "▶ 运行中"}
+                  </span>
+                )}
                 {job.total_chapters > 0 && (
                   <div className="job-progress-row">
                     <div className="job-progress-bar">
@@ -749,6 +896,7 @@ export default function App() {
               displayTitle={displayChapterTitle}
               onUpdateChapter={handleUpdateChapter}
               onDeleteChapter={handleDeleteChapter}
+              onBatchDeleteChapters={handleBatchDeleteChapters}
               onToggleValidity={handleToggleValidity}
               onExportDirectory={handleExportDirectory}
             />
@@ -776,26 +924,61 @@ export default function App() {
           <div className="page-heading">
             <h2>设置</h2>
           </div>
-          <div className="settings-section">
-            <h3>应用设置</h3>
-            <div className="setting-row">
-              <label>
-                批次大小
-                <select
-                  value={settings.chapter_batch_size ?? 30}
-                  onChange={(event) => {
-                    const value = Number(event.target.value) as 30 | 50 | 100;
-                    setSettings({ ...settings, chapter_batch_size: value });
-                    void invoke("save_app_settings", { settings: { ...settings, chapter_batch_size: value } });
-                  }}
-                >
-                  <option value={30}>30 章</option>
-                  <option value={50}>50 章</option>
-                  <option value={100}>100 章</option>
-                </select>
-              </label>
+          <section className="settings-section">
+            <h3>每批次章节数</h3>
+            <div className="setting-toggle-row">
+              <div className="mode-toggle mode-toggle-three setting-batch-size" role="radiogroup" aria-label="每批次章节数">
+                {([30, 50, 100] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={(settings.chapter_batch_size ?? 30) === value ? "active" : ""}
+                    aria-checked={(settings.chapter_batch_size ?? 30) === value}
+                    role="radio"
+                    disabled={!!busy}
+                    onClick={() => {
+                      const newSize = value as 30 | 50 | 100;
+                      setSettings({ ...settings, chapter_batch_size: newSize });
+                      void invoke("save_app_settings", { settings: { ...settings, chapter_batch_size: newSize } });
+                    }}
+                  >
+                    {value} 章
+                  </button>
+                ))}
+              </div>
+              <span>默认 30 章。任务运行中不能修改。</span>
             </div>
-          </div>
+          </section>
+          <section className="settings-section">
+            <h3>审查并发</h3>
+            <div className="setting-toggle-row">
+              <div className="mode-toggle mode-toggle-six setting-parallelism" role="radiogroup" aria-label="审查并发请求数">
+                {([1, 3, 6, 10, 25, 50] as const).map((value) => {
+                  const batchSize = settings.chapter_batch_size ?? 30;
+                  const maxParallelism = batchSize === 100 ? 50 : batchSize === 50 ? 25 : 10;
+                  const unavailable = value > maxParallelism;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      className={(settings.review_parallelism ?? 10) === value ? "active" : ""}
+                      aria-checked={(settings.review_parallelism ?? 10) === value}
+                      role="radio"
+                      disabled={!!busy || unavailable}
+                      title={unavailable ? `每批 ${batchSize} 章时最高可选并发 ${maxParallelism}` : undefined}
+                      onClick={() => {
+                        setSettings({ ...settings, review_parallelism: value as 1 | 3 | 6 | 10 | 25 | 50 });
+                        void invoke("save_app_settings", { settings: { ...settings, review_parallelism: value } });
+                      }}
+                    >
+                      {value === 1 ? "不并发" : value}
+                    </button>
+                  );
+                })}
+              </div>
+              <span>默认 10。并发越高审查越快，但 API 限流风险越大。</span>
+            </div>
+          </section>
         </div>
       )}
 
@@ -807,6 +990,23 @@ export default function App() {
           onClear={clearLogs}
           onRefresh={() => refreshLogs()}
         />
+      )}
+
+      {activeView === "compare" && detail && (
+        <div className="workspace">
+          <CompareView
+            chapters={detail.chapters}
+            selectedChapterId={selectedChapterId}
+            busy={busy}
+            originalRef={originalRef}
+            correctedRef={correctedRef}
+            onSelectChapter={setSelectedChapterId}
+            onBack={() => setActiveView("workspace")}
+            onExport={exportNovel}
+            onSaveCorrected={handleSaveCorrected}
+            onRestoreCorrected={handleRestoreCorrected}
+          />
+        </div>
       )}
 
       {dragActive && (
